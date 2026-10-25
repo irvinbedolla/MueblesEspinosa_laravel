@@ -1,12 +1,12 @@
-<!-- SIDEBAR LEFT -->
-<nav id="sidebar" class="d-flex flex-column justify-content-between p-2">
+<!-- SIDEBAR LEFT CON SCROLL HABILITADO -->
+<nav id="sidebar" class="d-flex flex-column justify-content-between p-2 overflow-y-auto">
     <div>
         <div class="px-3 py-4 text-center border-bottom border-secondary border-opacity-25 mb-3">
             <i class="bi bi-house-door-fill fs-2 text-info"></i>
             <h5 class="fw-bold m-0 mt-1">MUEBLES <span class="text-info">ESPINOSA</span></h5>
         </div>
 
-        <ul class="nav nav-pills flex-column">
+        <ul class="nav nav-pills flex-column pb-4">
             <li class="nav-item">
                 <a href="{{ route('dashboard') }}" class="nav-link {{ request()->is('dashboard') ? 'active' : '' }}">
                     <i class="bi bi-speedometer2 me-2"></i> Inicio
@@ -28,9 +28,29 @@
                     <i class="bi bi-people me-2"></i> Clientes
                 </a>
             </li>
+
+            @if(auth()->user()->isAdmin())
+                <li class="nav-item">
+                    <a href="{{ route('rutas.index') }}" class="nav-link text-white opacity-75 {{ request()->routeIs('rutas.*') ? 'active bg-primary' : '' }}">
+                        <i class="bi bi-map me-2"></i> Asignación de Rutas
+                    </a>
+                </li>
+            @endif
+
             <li class="nav-item">
-                <a href="#" class="nav-link"><i class="bi bi-cash-stack me-2"></i> Abonos / Cobranza</a>
+                <a href="{{ route('cobrador.mi_ruta') }}" class="nav-link {{ request()->routeIs('cobrador.*') ? 'active' : '' }}">
+                    <i class="bi bi-cash-stack me-2"></i> Cobranza
+                </a>
             </li>
+
+            <!-- Opción Abonos / Cobranza en el Sidebar -->
+            <li class="nav-item">
+                <a href="{{ route('abonos.index') }}" class="nav-link {{ request()->routeIs('abonos.*') ? 'active fw-bold' : '' }}">
+                    <i class="bi bi-wallet2 me-2"></i>
+                    <span>Abonos </span>
+                </a>
+            </li>
+
             <li class="nav-item">
                 <a href="{{ route('articulos.index') }}" class="nav-link {{ request()->is('articulos*') || request()->is('inventario*') ? 'active' : '' }}">
                     <i class="bi bi-boxes me-2"></i> Inventario
@@ -56,5 +76,4 @@
             </li>
         </ul>
     </div>
-
 </nav>

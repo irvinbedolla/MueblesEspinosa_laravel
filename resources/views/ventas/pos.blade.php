@@ -203,7 +203,7 @@
                     <input type="hidden" id="input_total" name="total" value="0">
                 </div>
                 <div class="col-md-3 text-end campo-credito">
-                    <small class="text-muted fw-bold d-block text-warning">CUOTA SUGERIDA</small>
+                    <small class="text-muted fw-bold d-block text-warning">MENSUALIDAD</small>
                     <h4 class="fw-bold text-warning m-0" id="txt_cuota">$0.00</h4>
                     <input type="hidden" id="input_cuota" name="cuota_pago" value="0">
                 </div>
@@ -523,7 +523,7 @@
                 <!-- TARJETA DEL TOTAL -->
                 <div class="p-3 bg-success bg-opacity-10 rounded-4 text-center mb-4">
                     <small class="text-muted fw-bold d-block text-uppercase">Total de la Venta:</small>
-                    <h2 class="fw-bold text-success m-0" id="resumen_total_venta">\$0.00</h2>
+                    <h2 class="fw-bold text-success m-0" id="resumen_total_venta">$0.00</h2>
                 </div>
 
                 <!-- BOTONERA DE DOCUMENTOS PDF -->
@@ -553,7 +553,7 @@
 
 <script>
 let carrito = [];
-let articulosDB = @json(\$articulosEnStock);
+let articulosDB = @json($articulosEnStock);
 let ventaProcesadaId = null;
 let detallesVentaIds = [];
 
@@ -946,9 +946,18 @@ function cambiarPaginaCatalogo(nuevaPagina) {
     }
 }
 
-// --- INTERCEPTAR ENVÍO Y MANEJO DEL MODAL RESUMEN ---
+// Variable de control para saber si la venta ya fue guardada en BD
+let ventaFinalizadaExitosamente = false;
+
+// Interceptar submit del formulario y abrir Modal Resumen
 document.getElementById('form_venta').addEventListener('submit', function(e) {
     e.preventDefault();
+
+    // Si la venta ya se guardó, no permitir reabrir para modificar
+    if (ventaFinalizadaExitosamente) {
+        alert('⚠️ Esta venta ya fue guardada correctamente. Haz clic en "Nueva Venta" para realizar otra operación.');
+        return;
+    }
 
     const clienteId = document.getElementById('input_cliente_id').value;
     if (!clienteId) {
@@ -967,16 +976,26 @@ document.getElementById('form_venta').addEventListener('submit', function(e) {
     document.getElementById('resumen_forma_pago').innerText = document.getElementById('lbl_forma_pago').innerText;
     document.getElementById('resumen_total_venta').innerText = document.getElementById('txt_total').innerText;
 
+    // Estado inicial de botones en el Modal antes de guardar
     document.getElementById('btn_pdf_ticket').disabled = true;
     document.getElementById('btn_pdf_boletas').disabled = true;
-    document.getElementById('btn_confirmar_guardar').disabled = false;
+    
+    const btnAceptar = document.getElementById('btn_confirmar_guardar');
+    btnAceptar.disabled = false;
+    btnAceptar.innerHTML = '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
 
     const modalResumen = new bootstrap.Modal(document.getElementById('modalResumenVenta'));
     modalResumen.show();
 });
 
+// Enviar datos por AJAX para guardar Venta, Kardex y Habilitar PDFs
+
 function enviarVentaBD() {
+    if (ventaFinalizadaExitosamente) return;
+
     const btnAceptar = document.getElementById('btn_confirmar_guardar');
+    const footerModal = document.querySelector('#modalResumenVenta .modal-footer');
+
     btnAceptar.disabled = true;
     btnAceptar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Guardando...';
 
@@ -995,12 +1014,23 @@ function enviarVentaBD() {
         if (data.status === 'success') {
             ventaProcesadaId = data.venta_id;
             detallesVentaIds = data.detalles;
+            ventaFinalizadaExitosamente = true; // Marcar como guardada
 
-            alert('✅ Venta finalizada y registrada correctamente en Kardex.');
-
+            // 1. Habilitar botones de PDF (Ticket y Boletas)
             document.getElementById('btn_pdf_ticket').disabled = false;
             document.getElementById('btn_pdf_boletas').disabled = false;
-            btnAceptar.innerHTML = '¡Venta Registrada!';
+
+            // 2. Bloquear toda la vista POS en el fondo
+            document.getElementById('btn_finalizar').disabled = true;
+            document.querySelectorAll('#form_venta input, #form_venta button').forEach(el => el.disabled = true);
+
+            // 3. Cambiar la botonera inferior del Modal a "Nueva Venta"
+            footerModal.innerHTML = `
+                <button type="button" class="btn btn-primary rounded-3 fw-bold px-4 shadow-sm w-100" onclick="iniciarNuevaVenta()">
+                    <i class="bi bi-plus-circle me-1"></i> Iniciar Nueva Venta
+                </button>
+            `;
+
         } else {
             alert('❌ Error: ' + data.message);
             btnAceptar.disabled = false;
@@ -1014,9 +1044,16 @@ function enviarVentaBD() {
     });
 }
 
+// Función para reiniciar la pantalla para una nueva venta limpia
+function iniciarNuevaVenta() {
+    window.location.reload(); // Recarga la página actual para obtener nuevo Folio y limpiar datos
+}
+
 function abrirPdfTicket() {
     if (ventaProcesadaId) {
-        window.open(`/ventas/${ventaProcesadaId}/pdf-ticket`, '_blank');
+        // Usa la ruta absoluta basada en la raíz del servidor o Blade
+        const url = "{{ url('ventas') }}/" + ventaProcesadaId + "/pdf-ticket";
+        window.open(url, '_blank');
     }
 }
 
@@ -1024,7 +1061,8 @@ function abrirPdfBoletas() {
     if (ventaProcesadaId && detallesVentaIds.length > 0) {
         detallesVentaIds.forEach(detalle => {
             const detalleId = (typeof detalle === 'object') ? (detalle.id || detalle.va_id) : detalle;
-            window.open(`/ventas/${ventaProcesadaId}/pdf-boleta/${detalleId}`, '_blank');
+            const url = "{{ url('ventas') }}/" + ventaProcesadaId + "/pdf-boleta/" + detalleId;
+            window.open(url, '_blank');
         });
     }
 }

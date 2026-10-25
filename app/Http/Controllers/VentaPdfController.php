@@ -4,11 +4,11 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Venta;
-use App\Models\VentaArticulo;
+use App\Models\VentaDetalle;
 use App\Models\Cliente;
 use App\Models\User;
 use App\Models\Articulo;
-use Codedge\Fpdf\Fpdf\Fpdf; // O FPDF nativo incluido en tu proyecto
+use FPDF;
 
 class VentaPdfController extends Controller
 {
@@ -17,9 +17,9 @@ class VentaPdfController extends Controller
      */
     public function ticket($id)
     {
-        $venta = Venta::with(['cliente', 'vendedor', 'articulos.articulo'])->findOrFail($id);
+        $venta = Venta::with(['cliente', 'vendedor', 'detalles.articulo'])->findOrFail($id);
 
-        $pdf = new Fpdf('P', 'mm', array(54, 130));
+        $pdf = new FPDF('P', 'mm', array(54, 130));
         $pdf->AddPage();
         $pdf->SetMargins(0, 0, 0);
         $pdf->SetAutoPageBreak(true, 0);
@@ -27,13 +27,13 @@ class VentaPdfController extends Controller
         $pdf->SetY(5);
         $pdf->SetX(5);
 
-        $pdf->SetDrawColor(0,0,0);
-        $pdf->SetFillColor(255,255,255);
-        $pdf->SetTextColor(0,0,0);
-        
+        $pdf->SetDrawColor(0, 0, 0);
+        $pdf->SetFillColor(255, 255, 255);
+        $pdf->SetTextColor(0, 0, 0);
+
         $pdf->SetFont('Arial', 'B', 10);
         $pdf->Cell(50, 8, iconv('UTF-8', 'ISO-8859-1', 'MUEBLES ESPINOSA'), 0, 1, 'C', 0);
-        
+
         $pdf->SetFont('Arial', 'B', 6);
         $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Venta N° ' . $venta->folio), 0, 1, 'L', 1);
         $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Calle Revolución #104'), 0, 1, 'L', 1);
@@ -41,7 +41,7 @@ class VentaPdfController extends Controller
         $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Cd. Altamirano Gro.'), 0, 1, 'L', 1);
 
         $fechaFormato = \Carbon\Carbon::parse($venta->fecha_venta)->format('d / m / Y');
-        $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Fecha: ' . $fechaFormato . " Hora: " . $venta->venta_hora), 0, 1, 'L', 1);
+        $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Fecha: ' . $fechaFormato . " Hora: " . ($venta->venta_hora ?? date('H:i'))), 0, 1, 'L', 1);
         $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Atendio: ' . ($venta->vendedor->username ?? 'S/A')), 0, 1, 'L', 1);
         $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Cliente: ' . ($venta->cliente->nombre ?? 'Sin Cliente')), 0, 1, 'L', 1);
         $pdf->Cell(28, 4, iconv('UTF-8', 'ISO-8859-1', 'Direccion: ' . ($venta->cliente->calle ?? 'N/A')), 0, 1, 'L', 1);
@@ -57,10 +57,11 @@ class VentaPdfController extends Controller
         $pdf->SetFont('Arial', 'B', 5);
 
         $totalCalc = 0;
-        foreach ($venta->articulos as $va) {
+        foreach ($venta->detalles as $va) {
             $cp = ($va->precio_unitario - $va->descuento) * $va->cantidad;
             $totalCalc += $cp;
-            $nombreArt = $va->articulo->nombre ?? 'Articulo';
+
+            $nombreArt = $va->nombre_articulo ?? ($va->articulo->nombre ?? 'Articulo');
 
             $pdf->Cell(34, 4, iconv('UTF-8', 'ISO-8859-1', mb_strimwidth($nombreArt, 0, 25, "...")), 1, 0, 'L', 0);
             $pdf->Cell(6, 4, iconv('UTF-8', 'ISO-8859-1', $va->cantidad), 1, 0, 'L', 1);
@@ -83,8 +84,8 @@ class VentaPdfController extends Controller
      */
     public function boleta($ventaId, $detalleId)
     {
-        $venta = Venta::with(['cliente', 'vendedor']).findOrFail($ventaId);
-        $va = VentaArticulo::with('articulo')->where('venta_id', $ventaId)->where('id', $detalleId)->firstOrFail();
+        $venta = Venta::with(['cliente', 'vendedor'])->findOrFail($ventaId);
+        $va = VentaDetalle::with('articulo')->where('venta_id', $ventaId)->where('id', $detalleId)->firstOrFail();
 
         $frecuencia = $venta->frecuencia_nombre ?? 'Semanal';
         $pagos = $venta->num_pagos ?? 1;
@@ -107,7 +108,7 @@ class VentaPdfController extends Controller
         $pago = ($temp - $abono_precio);
         $pagof = $n_pagos > 0 ? ($pago / $n_pagos) : 0;
 
-        $pdf = new Fpdf('P', 'mm', array(103, 175));
+        $pdf = new FPDF('P', 'mm', array(103, 175));
         $pdf->AddPage();
         $pdf->SetFont('Times', '', 9);
 
@@ -133,7 +134,7 @@ class VentaPdfController extends Controller
 
         // Colonia
         $pdf->SetY(64); $pdf->SetX(40);
-        $pdf0->Cell(10, 3, ' ');
+        $pdf->Cell(10, 3, ' ');
         $pdf->Cell(80, 3, iconv('UTF-8', 'ISO-8859-1', $venta->cliente->colonia ?? ''), 0);
 
         // Pueblo
@@ -149,12 +150,13 @@ class VentaPdfController extends Controller
         // Numero Serie
         $pdf->SetY(88); $pdf->SetX(40);
         $pdf->Cell(30, 3, ' ');
-        $pdf->Cell(54, 3, iconv('UTF-8', 'ISO-8859-1', $va->nserie ?? 'S/N'), 0);
+        $pdf->Cell(54, 3, iconv('UTF-8', 'ISO-8859-1', $va->numero_serie ?? 'S/N'), 0);
 
         // Primer renglon
+        $nombreArt = $va->nombre_articulo ?? ($va->articulo->nombre ?? '');
         $pdf->SetY(103); $pdf->SetX(5);
         $pdf->Cell(7, 3, '', 0);
-        $pdf->Cell(59, 3, $va->cantidad . "   " . iconv('UTF-8', 'ISO-8859-1', $va->articulo->nombre ?? ''), 0);
+        $pdf->Cell(59, 3, $va->cantidad . "   " . iconv('UTF-8', 'ISO-8859-1', $nombreArt), 0);
         $pdf->Cell(15, 3, "$" . number_format(($va->precio_unitario - $va->descuento) * $va->cantidad), 0);
 
         // Segundo renglon
@@ -179,6 +181,211 @@ class VentaPdfController extends Controller
 
         // Semanal
         $pdf->SetY(141); $pdf->SetX(0);
+        $pdf->Cell(3, 3, '', 0);
+        $pdf->Cell(20, 3, iconv('UTF-8', 'ISO-8859-1', $frecuencia), 0);
+
+        return response($pdf->Output('S'), 200)->header('Content-Type', 'application/pdf');
+    }
+
+    /**
+     * Boleta Formato PC (Primer código proporcionado)
+     */
+    public function boletaPC($ventaId, $detalleId)
+    {
+        $venta = Venta::with(['cliente', 'vendedor'])->findOrFail($ventaId);
+        $va = VentaDetalle::with('articulo')->where('venta_id', $ventaId)->where('id', $detalleId)->firstOrFail();
+
+        $frecuencia = match((int)$venta->frecuencia_nombre) {
+            7 => 'Semanal',
+            14 => 'Quincenal',
+            default => $venta->frecuencia_nombre ?? 'Semanal'
+        };
+
+        $pagos = $venta->num_pagos ?? 1;
+        $n_pagos = match($venta->frecuencia_nombre) {
+            '7', 7 => $pagos * 4,
+            '14', 14 => $pagos * 2,
+            default => $pagos
+        };
+
+        $venta_total = $venta->total;
+        $abono_precio = $venta->anticipo ?? 0;
+
+        $pct = match($pagos) {
+            1 => 40, 2 => 35, 3 => 30, 4 => 25, 5 => 20, 6 => 15, 7 => 10, default => 5
+        };
+
+        $venta_descuento = $venta_total * $pct / 100;
+        $temp = $venta_total - $venta_descuento;
+        $pago = ($temp - $abono_precio);
+        $pagof = $n_pagos > 0 ? ($pago / $n_pagos) : 0;
+
+        $pdf = new FPDF('P', 'mm', array(103, 175));
+        $pdf->AddPage();
+        $pdf->SetFont('Times', '', 9);
+
+        // Numero de venta
+        $pdf->SetY(44); $pdf->SetX(60);
+        $pdf->Cell(75, 3, ' ');
+        $pdf->Cell(10, 3, $venta->folio, 0);
+
+        // Fecha
+        $pdf->SetY(50); $pdf->SetX(32);
+        $pdf->Cell(47, 4, ' ');
+        $pdf->Cell(40, 4, \Carbon\Carbon::parse($venta->fecha_venta)->format('d/m/Y'), 0);
+
+        // Cliente
+        $pdf->SetY(55); $pdf->SetX(40);
+        $pdf->Cell(5, 3, ' ');
+        $pdf->Cell(85, 3, iconv('UTF-8', 'ISO-8859-1', $venta->cliente->nombre ?? ''), 0);
+
+        // Calle
+        $pdf->SetY(59); $pdf->SetX(40);
+        $pdf->Cell(10, 3, ' ');
+        $pdf->Cell(80, 3, iconv('UTF-8', 'ISO-8859-1', $venta->cliente->calle ?? ''), 0);
+
+        // Colonia
+        $pdf->SetY(64); $pdf->SetX(40);
+        $pdf->Cell(10, 3, ' ');
+        $pdf->Cell(80, 3, iconv('UTF-8', 'ISO-8859-1', $venta->cliente->colonia ?? ''), 0);
+
+        // Pueblo
+        $pdf->SetY(69); $pdf->SetX(40);
+        $pdf->Cell(22, 3, ' ');
+        $pdf->Cell(70, 3, iconv('UTF-8', 'ISO-8859-1', ($venta->cliente->ciudad ?? '') . " " . ($venta->cliente->estado ?? '')), 0);
+
+        // Vendedor
+        $pdf->SetY(74); $pdf->SetX(40);
+        $pdf->Cell(12, 3, ' ');
+        $pdf->Cell(80, 3, iconv('UTF-8', 'ISO-8859-1', $venta->vendedor->username ?? ''), 0);
+
+        // Numero Serie
+        $pdf->SetY(88); $pdf->SetX(40);
+        $pdf->Cell(30, 3, ' ');
+        $pdf->Cell(54, 3, iconv('UTF-8', 'ISO-8859-1', $va->numero_serie ?? 'S/N'), 0);
+
+        // Renglones
+        $pdf->SetY(103); $pdf->SetX(5);
+        $pdf->Cell(7, 3, '', 0);
+        $pdf->Cell(59, 3, $va->cantidad . "   " . iconv('UTF-8', 'ISO-8859-1', $va->nombre_articulo ?? ($va->articulo->nombre ?? '')), 0);
+        $pdf->Cell(15, 3, "$" . number_format(($va->precio_unitario - $va->descuento) * $va->cantidad), 0);
+
+        $pdf->SetY(110); $pdf->SetX(40);
+        $pdf->Cell(13, 3, '', 0);
+        $pdf->Cell(60, 3, "Marca: " . iconv('UTF-8', 'ISO-8859-1', $va->articulo->marca ?? 'N/A'), 0);
+
+        $pdf->SetY(118); $pdf->SetX(40);
+        $pdf->Cell(13, 3, '', 0);
+        $pdf->Cell(60, 3, "Modelo: " . iconv('UTF-8', 'ISO-8859-1', $va->articulo->modelo ?? 'N/A'), 0);
+
+        $pdf->SetY(128); $pdf->SetX(40);
+        $pdf->Cell(70, 3, '', 0);
+        $pdf->Cell(25, 3, "$" . number_format(($va->precio_unitario - $va->descuento) * $va->cantidad), 0);
+
+        $pdf->SetY(137); $pdf->SetX(0);
+        $pdf->Cell(74, 3, '', 0);
+        $pdf->Cell(20, 3, "$" . number_format($pagof), 0);
+
+        $pdf->SetY(141); $pdf->SetX(0);
+        $pdf->Cell(3, 3, '', 0);
+        $pdf->Cell(20, 3, iconv('UTF-8', 'ISO-8859-1', $frecuencia), 0);
+
+        return response($pdf->Output('S'), 200)->header('Content-Type', 'application/pdf');
+    }
+
+    /**
+     * Boleta Formato Móvil (Segundo código proporcionado)
+     */
+    public function boletaMovil($ventaId, $detalleId)
+    {
+        $venta = Venta::with(['cliente', 'vendedor'])->findOrFail($ventaId);
+        $va = VentaDetalle::with('articulo')->where('venta_id', $ventaId)->where('id', $detalleId)->firstOrFail();
+
+        $frecuencia = match((int)$venta->frecuencia_nombre) {
+            7 => 'Semanal',
+            14 => 'Quincenal',
+            default => $venta->frecuencia_nombre ?? 'Semanal'
+        };
+
+        $pagos = $venta->num_pagos ?? 1;
+        $n_pagos = match($venta->frecuencia_nombre) {
+            '7', 7 => $pagos * 4,
+            '14', 14 => $pagos * 2,
+            default => $pagos
+        };
+
+        $venta_total = $venta->total;
+        $abono_precio = $venta->anticipo ?? 0;
+
+        $pct = match($pagos) {
+            1 => 40, 2 => 35, 3 => 30, 4 => 25, 5 => 20, 6 => 15, 7 => 10, default => 5
+        };
+
+        $venta_descuento = $venta_total * $pct / 100;
+        $temp = $venta_total - $venta_descuento;
+        $pago = ($temp - $abono_precio);
+        $pagof = $n_pagos > 0 ? ($pago / $n_pagos) : 0;
+
+        $pdf = new FPDF('P', 'mm', array(100, 175));
+        $pdf->AddPage();
+        $pdf->SetFont('Times', '', 9);
+
+        // Coordenadas ajustadas según script móvil
+        $pdf->SetY(7); $pdf->SetX(60);
+        $pdf->Cell(75, 3, ' ');
+        $pdf->Cell(10, 3, $venta->folio, 0);
+
+        $pdf->SetY(12); $pdf->SetX(32);
+        $pdf->Cell(47, 4, ' ');
+        $pdf->Cell(40, 4, \Carbon\Carbon::parse($venta->fecha_venta)->format('d/m/Y'), 0);
+
+        $pdf->SetY(18); $pdf->SetX(40);
+        $pdf->Cell(5, 3, ' ');
+        $pdf->Cell(85, 3, iconv('UTF-8', 'ISO-8859-1', $venta->cliente->nombre ?? ''), 0);
+
+        $pdf->SetY(23); $pdf->SetX(40);
+        $pdf->Cell(10, 3, ' ');
+        $pdf->Cell(80, 3, iconv('UTF-8', 'ISO-8859-1', $venta->cliente->calle ?? ''), 0);
+
+        $pdf->SetY(27); $pdf->SetX(40);
+        $pdf->Cell(11, 3, ' ');
+        $pdf->Cell(80, 3, iconv('UTF-8', 'ISO-8859-1', $venta->cliente->colonia ?? ''), 0);
+
+        $pdf->SetY(32); $pdf->SetX(40);
+        $pdf0 = $pdf;
+        $pdf0->Cell(22, 3, ' ');
+        $pdf0->Cell(70, 3, iconv('UTF-8', 'ISO-8859-1', ($venta->cliente->ciudad ?? '') . " " . ($venta->cliente->estado ?? '')), 0);
+
+        $pdf->SetY(38); $pdf->SetX(40);
+        $pdf->Cell(12, 3, ' ');
+        $pdf->Cell(80, 3, iconv('UTF-8', 'ISO-8859-1', $venta->vendedor->username ?? ''), 0);
+
+        $pdf->SetY(54); $pdf->SetX(40);
+        $pdf->Cell(30, 3, ' ');
+        $pdf->Cell(54, 3, iconv('UTF-8', 'ISO-8859-1', $va->numero_serie ?? 'S/N'), 0);
+
+        $pdf->SetY(68); $pdf->SetX(5);
+        $pdf->Cell(7, 3, '', 0);
+        $pdf->Cell(59, 3, $va->cantidad . "   " . iconv('UTF-8', 'ISO-8859-1', $va->nombre_articulo ?? ($va->articulo->nombre ?? '')), 0);
+        $pdf->Cell(15, 3, "$" . number_format(($va->precio_unitario - $va->descuento) * $va->cantidad), 0);
+
+        $pdf->SetY(76); $pdf->SetX(40);
+        $pdf->Cell(13, 3, '', 0);
+        $pdf->Cell(60, 3, "Marca: " . iconv('UTF-8', 'ISO-8859-1', $va->articulo->marca ?? 'N/A'), 0);
+
+        $pdf->SetY(84); $pdf->SetX(40);
+        $pdf->Cell(13, 3, '', 0);
+        $pdf->Cell(60, 3, "Modelo: " . iconv('UTF-8', 'ISO-8859-1', $va->articulo->modelo ?? 'N/A'), 0);
+
+        $pdf->SetY(95); $pdf->SetX(5);
+        $pdf->Cell(71, 3, '', 0);
+        $pdf->Cell(15, 3, "$" . number_format(($va->precio_unitario - $va->descuento) * $va->cantidad), 0);
+
+        $pdf->SetY(103); $pdf->SetX(5);
+        $pdf->Cell(71, 3, '', 0);
+        $pdf->Cell(15, 3, "$" . number_format($pagof), 0);
+
+        $pdf->SetY(108); $pdf->SetX(0);
         $pdf->Cell(3, 3, '', 0);
         $pdf->Cell(20, 3, iconv('UTF-8', 'ISO-8859-1', $frecuencia), 0);
 

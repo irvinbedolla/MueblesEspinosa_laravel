@@ -41,27 +41,24 @@ class Venta extends Model
         'status',
     ];
 
-    // Relación con el Cliente
+    public function detalles()
+    {
+        return $this->hasMany(VentaDetalle::class, 'venta_id');
+    }
+
     public function cliente()
     {
         return $this->belongsTo(Cliente::class, 'cliente_id');
     }
 
-    // Relación con el Vendedor
     public function vendedor()
     {
         return $this->belongsTo(User::class, 'vendedor_id');
     }
 
-    // Relación con el Cobrador asignado
     public function cobrador()
     {
         return $this->belongsTo(User::class, 'cobrador_id');
     }
 
-    // Relación con los artículos detallados en la venta
-    public function detalles()
-    {
-        return $this->hasMany(VentaDetalle::class, 'venta_id');
-    }
 }
