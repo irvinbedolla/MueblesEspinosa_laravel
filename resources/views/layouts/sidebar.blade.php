@@ -43,6 +43,12 @@
                 </a>
             </li>
 
+            <li class="nav-item">
+                <a class="nav-link text-white fw-semibold {{ request()->routeIs('gastos.*') ? 'active bg-primary' : '' }}" href="{{ route('gastos.index') }}">
+                    <i class="bi bi-wallet2 me-2"></i> Gastos
+                </a>
+            </li>
+
             <!-- Opción Abonos / Cobranza en el Sidebar -->
             <li class="nav-item">
                 <a href="{{ route('abonos.index') }}" class="nav-link {{ request()->routeIs('abonos.*') ? 'active fw-bold' : '' }}">
@@ -57,10 +63,14 @@
                 </a>
             </li>
             <li class="nav-item">
-                <a href="#" class="nav-link"><i class="bi bi-journal-text me-2"></i> Diario / Cierre</a>
+                <a class="nav-link text-white fw-semibold {{ request()->routeIs('cierres.*') ? 'active bg-primary' : '' }}" href="{{ route('cierres.index') }}">
+                    <i class="bi bi-cash-stack me-2"></i> Cierre
+                </a>
             </li>
             <li class="nav-item">
-                <a href="#" class="nav-link"><i class="bi bi-bar-chart-line me-2"></i> Reportes</a>
+                <a class="nav-link text-white fw-semibold {{ request()->routeIs('reportes.*') ? 'active bg-primary' : '' }}" href="{{ route('reportes.index') }}">
+                    <i class="bi bi-file-earmark-bar-graph me-2"></i> Reportes
+                </a>
             </li>
 
             <li class="nav-item">

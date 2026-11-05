@@ -7,6 +7,8 @@ use App\Models\Roles;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+
 
 class UserController extends Controller
 {
@@ -67,37 +69,65 @@ class UserController extends Controller
     }
 
     /**
-     * Actualizar usuario y su rol
+     * Actualizar usuario y su rol (Soporta UUID e ID Legacy)
      */
-    public function update(Request $request, User $user)
+    public function update(Request $request, $id)
     {
+        // 1. Buscar al usuario explícitamente por UUID 'id' o por 'user_id_legacy'
+        $user = User::where('id', $id)
+                    ->orWhere('user_id_legacy', $id)
+                    ->firstOrFail();
+
+        // 2. Normalizar strings antes de validar
+        $usernameClean = strtolower(trim($request->username));
+        $emailClean    = strtolower(trim($request->email));
+
+        $request->merge([
+            'username' => $usernameClean,
+            'email'    => $emailClean,
+        ]);
+
+        // 3. Validar pasando directamente el UUID real ($user->id)
         $request->validate([
-            'username'  => 'required|string|max:255|unique:users,username,' . $user->id,
-            'email'     => 'required|email|max:255|unique:users,email,' . $user->id,
+            'email'     => [
+                'required',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($user->id, 'id')->withoutTrashed()
+            ],
             'password'  => 'nullable|string|min:6',
-            'role_id'   => 'required|exists:roles,id',
+            'role_id'   => 'required',
             'is_active' => 'required|boolean',
         ]);
 
         $data = [
-            'username'  => strtolower(trim($request->username)),
-            'email'     => strtolower(trim($request->email)),
-            'is_active' => $request->is_active,
+            'username'  => $usernameClean,
+            'email'     => $emailClean,
+            'is_active' => (bool) $request->is_active,
         ];
 
-        // Solo actualizar contraseña si se ingresó una nueva
+        // Actualizar contraseña solo si se ingresó un valor
         if ($request->filled('password')) {
             $data['password'] = Hash::make($request->password);
         }
 
         $user->update($data);
 
-        // Actualizar su rol
+        // 4. Sincronizar el rol en la tabla pivote
         $user->roles()->sync([$request->role_id]);
+
+        // 5. LIMPIAR LA CACHÉ DE ROLES Y PERMISOS
+        if (class_exists(\Spatie\Permission\PermissionRegistrar::class)) {
+            // Si usas Spatie Laravel-Permission:
+            app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+        } else {
+            // Si usas la Caché estándar de Laravel:
+            \Illuminate\Support\Facades\Cache::forget('spatie.permission.cache');
+            \Illuminate\Support\Facades\Cache::flush();
+        }
 
         return redirect()->route('users.index')->with('success', 'Usuario actualizado correctamente.');
     }
-
     /**
      * Eliminar usuario (Baja lógica)
      */

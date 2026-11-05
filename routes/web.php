@@ -11,6 +11,11 @@ use App\Http\Controllers\VentaController;
 use App\Http\Controllers\VentaPdfController;
 use App\Http\Controllers\RutaCobroController;
 use App\Http\Controllers\AbonoController;
+use App\Http\Controllers\CierreController;
+use App\Http\Controllers\ReporteController;
+use App\Http\Controllers\GastoController;
+
+
 
 // Rutas Públicas (Login)
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
@@ -94,5 +99,43 @@ Route::middleware(['auth'])->group(function () {
     // Endpoints para Modales AJAX
     Route::post('/abonos/cambiar-cobrador', [AbonoController::class, 'cambiarCobrador'])->name('abonos.cambiarCobrador');
     Route::post('/abonos/guardar-notas', [AbonoController::class, 'guardarNotas'])->name('abonos.guardarNotas');
+    Route::get('/abonos-buscar-ajax', [AbonoController::class, 'buscarVentasAjax'])->name('abonos.buscar.ajax');
+    Route::post('/abonos/actualizar-telefono', [AbonoController::class, 'actualizarTelefono'])->name('abonos.telefono.update');
+    Route::post('/abonos/fijar-gps', [AbonoController::class, 'fijarGps'])->name('abonos.gps.store');
+    Route::post('/abonos/subir-evidencia', [AbonoController::class, 'subirEvidencia'])->name('abonos.evidencia.store');
+    Route::post('/abonos/notas', [AbonoController::class, 'guardarNotas'])->name('abonos.notas.store');
+    Route::post('/abonos/reagendar', [AbonoController::class, 'reagendarVisita'])->name('abonos.reagendar.store');
+    Route::post('/abonos/descuento', [AbonoController::class, 'aplicarDescuento'])->name('abonos.descuento.store');
+    Route::post('/abonos/reasignar-cobrador', [AbonoController::class, 'reasignarCobrador'])->name('abonos.cobrador.update');
 
+    //Rutas de cierres
+    Route::get('/cierres', [CierreController::class, 'index'])->name('cierres.index');
+    Route::get('/cierres/reporte-pdf', [CierreController::class, 'generarPdf'])->name('cierres.pdf');
+
+    //Rutas de reportes
+    Route::get('/reportes', [ReporteController::class, 'index'])->name('reportes.index');
+    Route::get('/reportes/buscar-cliente-ajax', [ReporteController::class, 'buscarClienteAjax'])->name('reportes.cliente.ajax');
+    Route::get('/reportes/obtener-datos', [ReporteController::class, 'obtenerDatosReporte'])->name('reportes.datos');
+    Route::get('/reportes/exportar-pdf', [ReporteController::class, 'exportarPdf'])->name('reportes.exportar.pdf');
+
+    // 1. RUTA PRINCIPAL (La que arrojó el error por no tener ->name('gastos.index'))
+    Route::get('/gastos', [GastoController::class, 'index'])->name('gastos.index');
+
+    // 2. Rutas para Gastos Operativos
+    Route::post('/gastos/store', [GastoController::class, 'storeGasto'])->name('gastos.store');
+    Route::get('/gastos/consultar-ajax', [GastoController::class, 'consultarGastosAjax'])->name('gastos.consultar.ajax');
+
+    // 3. Rutas para Préstamos
+    Route::get('/gastos/prestamos-ajax', [GastoController::class, 'obtenerPrestamosAjax'])->name('gastos.prestamos.ajax');
+    Route::post('/gastos/prestamos/store', [GastoController::class, 'storePrestamo'])->name('gastos.prestamos.store');
+    Route::post('/gastos/prestamos/abonar', [GastoController::class, 'abonarPrestamo'])->name('gastos.prestamos.abonar');
+    Route::get('/gastos/prestamos/historial/{id}', [GastoController::class, 'historialAbonosPrestamo'])->name('gastos.prestamos.historial');
+
+    // 4. Ruta para Eliminar
+    Route::delete('/gastos/eliminar', [GastoController::class, 'eliminarRegistro'])->name('gastos.eliminar');
+
+    // Cambiar artículo de una venta y consultar inventario del vendedor
+    Route::get('/ventas/{venta}/inventario-vendedor', [VentaController::class, 'obtenerInventarioVendedorAjax'])->name('ventas.inventario_vendedor');
+    Route::post('/ventas/{venta}/cambiar-articulo', [VentaController::class, 'cambiarArticuloVenta'])->name('ventas.cambiar_articulo');
+    Route::post('/ventas/{id}/cambiar-estatus', [VentaController::class, 'cambiarEstatusStatus'])->name('ventas.cambiar_estatus');
 });

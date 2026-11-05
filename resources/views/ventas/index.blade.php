@@ -39,23 +39,39 @@
         </div>
     </div>
 
-    <!-- BUSCADOR -->
+    <!-- BUSCADOR E INTEGRACIÓN DE FECHAS -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
         <form action="{{ route('ventas.index') }}" method="GET" class="row g-2 align-items-center">
             <input type="hidden" name="filtro" value="{{ $filtro }}">
-            <div class="col-md-10">
+            
+            <div class="col-12 col-md-4">
                 <div class="input-group">
                     <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-search"></i></span>
-                    <input type="text" name="buscar" class="form-control bg-light border-start-0 ps-0" placeholder="Buscar por Folio o Nombre del Cliente..." value="{{ $busqueda }}">
+                    <input type="text" name="buscar" class="form-control bg-light border-start-0 ps-0" placeholder="Buscar por Folio o Cliente..." value="{{ $busqueda }}">
                 </div>
             </div>
-            <div class="col-md-2 d-grid">
-                <button type="submit" class="btn btn-outline-primary rounded-3 fw-semibold">Filtrar</button>
+
+            <div class="col-6 col-md-3">
+                <div class="input-group">
+                    <span class="input-group-text bg-light text-muted small">Desde</span>
+                    <input type="date" name="fecha_inicio" class="form-control bg-light" value="{{ request('fecha_inicio') }}">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="input-group">
+                    <span class="input-group-text bg-light text-muted small">Hasta</span>
+                    <input type="date" name="fecha_fin" class="form-control bg-light" value="{{ request('fecha_fin') }}">
+                </div>
+            </div>
+
+            <div class="col-12 col-md-2 d-grid">
+                <button type="submit" class="btn btn-primary rounded-3 fw-semibold"><i class="bi bi-filter me-1"></i> Filtrar</button>
             </div>
         </form>
     </div>
 
-    <!-- TABLA DE VENTAS -->
+    <!-- TABLA GENERAL DE VENTAS -->
     <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
@@ -69,17 +85,16 @@
                         <th class="text-center">Estatus</th>
 
                         @if(($filtro ?? 'Abierta') === 'Abierta')
-                            @if(auth()->user()->hasRole('administrador'))
+                            @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
                                 <th class="text-center">Continuar</th>
                                 <th class="text-center">Pasar a Pendiente</th>
                                 <th class="text-center pe-4">Descartar</th>
                             @endif
                         @else
-                            <!-- COLUMNAS IMAGEN 1 -->
                             <th class="text-center">Detalles</th>
                             <th class="text-center pe-4">Historial</th>
-                            @if(auth()->user()->hasRole('administrador'))
-                                <th class="text-center pe-4">Cambiar</th>
+                            @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
+                                <th class="text-center pe-4">Cambiar Estatus</th>
                             @endif
                         @endif
                     </tr>
@@ -112,7 +127,7 @@
                             </td>
 
                             @if(($filtro ?? 'Abierta') === 'Abierta')
-                                @if(auth()->user()->hasRole('administrador'))
+                                @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
                                     <td class="text-center">
                                         <a href="{{ route('ventas.continuar', $v->id) }}" class="btn btn-sm btn-outline-primary rounded-3 px-3 fw-semibold shadow-sm">
                                             <i class="bi bi-pencil-square me-1"></i> Abrir
@@ -138,7 +153,6 @@
                                     </td>
                                 @endif
                             @else
-                                <!-- ACCIONES IMAGEN 1: DETALLES, ABONAR, HISTORIAL -->
                                 <td class="text-center">
                                     <button type="button" class="btn btn-sm btn-outline-primary rounded-3 px-3 fw-semibold" onclick="verDetallesVenta('{{ $v->id }}')">
                                         <i class="bi bi-eye me-1"></i> Ver
@@ -149,11 +163,11 @@
                                         <i class="bi bi-clock-history me-1"></i> Historial
                                     </button>
                                 </td>
-                                @if(auth()->user()->hasRole('administrador'))
+                                @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
                                     <td class="text-center pe-4">
                                         <button type="button" 
                                                 class="btn btn-sm btn-primary rounded-3 px-3 fw-semibold shadow-sm" 
-                                                onclick="abrirModalCambioEstatus('{{ $v->id }}', '{{$v->folio }}', '{{ $v->status }}', '{{ addslashes($v->cliente->nombre ?? 'Sin Cliente') }}')">
+                                                onclick="abrirModalCambioEstatus('{{ $v->id }}', '{{ $v->folio }}', '{{ $v->status }}', '{{ addslashes($v->cliente->nombre ?? 'Sin Cliente') }}')">
                                             <i class="bi bi-gear-fill me-1"></i> Cambiar
                                         </button>
                                     </td>
@@ -169,27 +183,24 @@
                         </tr>
                     @endforelse
                 </tbody>
-            </table> <!-- CIERRE CORRECTO DE LA TABLA -->
-        </div> <!-- CIERRE CORRECTO DEL TABLE-RESPONSIVE -->
+            </table>
+        </div>
 
-        <!-- FOOTER DE LA TARJETA CON LA PAGINACIÓN ABAJO -->
         <div class="card-footer bg-white border-top py-3 px-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
             <div>
                 <small class="text-muted fw-semibold">
                     Mostrando <strong>{{ $ventas->firstItem() ?? 0 }}</strong> al <strong>{{ $ventas->lastItem() ?? 0 }}</strong> de <strong>{{ $ventas->total() }}</strong> ventas
                 </small>
             </div>
-
             <div>
-                <!-- Renderizado explícito de los enlaces con Bootstrap 5 -->
                 {{ $ventas->links('pagination::bootstrap-5') }}
             </div>
         </div>
     </div>
 
-    <!-- MODAL DESGLOSE TÉCNICO (IMAGEN 2 y 3) -->
+    <!-- MODAL DESGLOSE TÉCNICO -->
     <div class="modal fade" id="modalDesgloseTecnico" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
             <div class="modal-content border-0 shadow-lg rounded-4">
                 <div class="modal-header border-bottom-0 pb-0">
                     <h5 class="modal-title fw-bold text-dark d-flex align-items-center">
@@ -205,20 +216,77 @@
                                     <th>N° Venta</th>
                                     <th>Cantidad</th>
                                     <th>Artículo</th>
-                                    <th class="text-center">N° Serie / Acción</th>
+                                    <th class="text-center">N° Serie</th>
                                     <th class="text-end">Precio U.</th>
                                     <th class="text-end">Total</th>
                                     <th class="text-center">Boletas / PDF</th>
+                                    @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
+                                        <th class="text-center">Cambio Art.</th>
+                                    @endif
                                 </tr>
                             </thead>
                             <tbody id="tbl_desglose_body">
-                                <!-- Inyección dinámica de filas vía JS -->
+                                <!-- Inyección dinámica vía JS -->
                             </tbody>
                         </table>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0 pt-0">
                     <button type="button" class="btn btn-light rounded-3 px-4 fw-bold" data-bs-dismiss="modal">Cerrar Ventana</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL PARA CAMBIO DE ARTÍCULO -->
+    <div class="modal fade" id="modalCambiarArticuloModal" tabindex="-1" aria-hidden="true" style="z-index: 1060;">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg rounded-4">
+                <div class="modal-header border-bottom-0">
+                    <h5 class="modal-title fw-bold text-dark">
+                        <i class="bi bi-arrow-repeat text-warning me-2 fs-4"></i> Sustituir Artículo en Venta
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="formCambiarArticuloModal">
+                        <input type="hidden" id="ca_venta_id">
+                        <input type="hidden" id="ca_detalle_id">
+                        <input type="hidden" id="ca_nuevo_articulo_id">
+
+                        <div class="mb-3">
+                            <small class="text-muted fw-bold d-block">ARTÍCULO ACTUAL:</small>
+                            <strong class="text-dark fs-6" id="ca_articulo_actual_nombre">---</strong>
+                        </div>
+
+                        <div class="mb-3 position-relative">
+                            <label class="form-label text-muted fw-semibold">Seleccionar Nuevo Artículo (Stock del Vendedor)</label>
+                            <input type="text" id="ca_input_buscar_articulo" class="form-control rounded-3" placeholder="Escribe el nombre o código del artículo..." autocomplete="off">
+                            
+                            <!-- Lista desplegable predictiva -->
+                            <div id="ca_lista_resultados" class="list-group position-absolute w-100 shadow-sm d-none mt-1" style="max-height: 200px; overflow-y: auto; z-index: 1070;"></div>
+                        </div>
+
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted fw-semibold">Precio Unitario ($)</label>
+                                <input type="number" step="0.01" id="ca_nuevo_precio" class="form-control rounded-3" placeholder="0.00" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted fw-semibold">Stock Disponible</label>
+                                <input type="text" id="ca_stock_disp" class="form-control bg-light rounded-3" readonly value="0 pzas">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted fw-semibold">Motivo del Cambio / Observación</label>
+                            <textarea id="ca_motivo" class="form-control rounded-3" rows="2" placeholder="Describe la causa del cambio de mercancía..."></textarea>
+                        </div>
+
+                        <button type="button" onclick="guardarCambioArticuloAccion()" class="btn btn-warning text-dark rounded-pill w-100 fw-bold shadow-sm">
+                            <i class="bi bi-check-circle-fill me-1"></i> Aplicar Cambio e Incrementar/Descontar Stocks
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -236,7 +304,6 @@
                 </div>
                 
                 <div class="modal-body p-4">
-                    <!-- TARJETA RESUMEN DEL ESTADO DE CUENTA -->
                     <div class="row g-3 mb-4">
                         <div class="col-md-4">
                             <div class="p-3 bg-light rounded-3 border">
@@ -258,7 +325,6 @@
                         </div>
                     </div>
 
-                    <!-- TABLA DE ABONOS -->
                     <div class="table-responsive">
                         <table class="table table-hover align-middle">
                             <thead class="table-light small text-uppercase">
@@ -270,7 +336,7 @@
                                 </tr>
                             </thead>
                             <tbody id="tbl_historial_body">
-                                <!-- Filas dinámicas generadas vía JS -->
+                                <!-- Generado vía JS -->
                             </tbody>
                         </table>
                     </div>
@@ -283,39 +349,7 @@
         </div>
     </div>
 
-    <!-- FILTROS POR FECHA Y BÚSQUEDA INTEGRADOS (Remplaza la tarjeta de búsqueda anterior) -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form action="{{ route('ventas.index') }}" method="GET" class="row g-2 align-items-center">
-            <input type="hidden" name="filtro" value="{{ $filtro }}">
-            
-            <div class="col-12 col-md-4">
-                <div class="input-group">
-                    <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-search"></i></span>
-                    <input type="text" name="buscar" class="form-control bg-light border-start-0 ps-0" placeholder="Buscar por Folio o Cliente..." value="{{ $busqueda }}">
-                </div>
-            </div>
-
-            <div class="col-6 col-md-3">
-                <div class="input-group">
-                    <span class="input-group-text bg-light text-muted small">Desde</span>
-                    <input type="date" name="fecha_inicio" class="form-control bg-light" value="{{ request('fecha_inicio') }}">
-                </div>
-            </div>
-
-            <div class="col-6 col-md-3">
-                <div class="input-group">
-                    <span class="input-group-text bg-light text-muted small">Hasta</span>
-                    <input type="date" name="fecha_fin" class="form-control bg-light" value="{{ request('fecha_fin') }}">
-                </div>
-            </div>
-
-            <div class="col-12 col-md-2 d-grid">
-                <button type="submit" class="btn btn-primary rounded-3 fw-semibold"><i class="bi bi-filter me-1"></i> Filtrar</button>
-            </div>
-        </form>
-    </div>
-
-    <!-- MODAL GESTIÓN DE ESTATUS (ESTILO IMAGEN CON ALERTAS PREVIAS) -->
+    <!-- MODAL GESTIÓN DE ESTATUS -->
     <div class="modal fade" id="modalCambiarEstatus" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content border-0 shadow-lg rounded-4">
@@ -333,7 +367,6 @@
                     </div>
 
                     <div class="row g-4">
-                        <!-- COLUMNA IZQUIERDA: GLOSARIO EXPLICATIVO -->
                         <div class="col-md-5 border-end pe-md-4">
                             <h6 class="fw-bold text-muted small text-uppercase mb-3">
                                 <i class="bi bi-info-circle me-1"></i> Glosario de Acciones
@@ -354,10 +387,12 @@
                                 <li class="mb-0">
                                     <strong class="text-dark d-block">Eliminar:</strong> Borra la venta físicamente y retorna stock.
                                 </li>
+                                <li class="mb-3">
+                                    <strong class="text-warning text-dark d-block">Cambio de Artículo:</strong> Sustituye una pieza por otra del inventario del vendedor ajustando montos y stocks.
+                                </li>
                             </ul>
                         </div>
 
-                        <!-- COLUMNA DERECHA: BOTONERA DE ACCIÓN DIRECTA CON ALERTA -->
                         <div class="col-md-7 ps-md-4">
                             <h6 class="fw-bold text-muted small text-uppercase mb-3">
                                 <i class="bi bi-lightning me-1"></i> Seleccionar Nuevo Estado
@@ -388,6 +423,10 @@
                                     <i class="bi bi-trash-fill me-2"></i> Eliminar Venta Permanente
                                 </button>
 
+                                <button type="button" class="btn btn-outline-warning text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="abrirSustitucionDesdeEstatus()">
+                                    <i class="bi bi-arrow-repeat me-2"></i> Realizar Cambio de Artículo
+                                </button>
+
                                 <button type="button" class="btn btn-outline-info text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Pendiente', 'Reactivar Venta (Regresar a Pendiente)', 'Se volverá a activar el cobro y la cuenta regresará a estado Pendiente.')">
                                     <i class="bi bi-arrow-repeat text-info me-2"></i> Reactivar Venta (Regresar a Pendiente)
                                 </button>
@@ -399,20 +438,22 @@
         </div>
     </div>
 
-    <!-- FORMULARIO OCULTO PARA PROCESAR EL ENVÍO POR POST -->
     <form id="form_procesar_estatus" method="POST" action="" class="d-none">
         @csrf
         <input type="hidden" name="nuevo_estatus" id="hidden_nuevo_estatus">
     </form>
 
-    <!-- JAVASCRIPT DE MANEJO DE DETALLES Y CAMBIO DE SERIE -->
+    <!-- JAVASCRIPT PRINCIPAL -->
     <script>
-        // Variable global para mantener la venta activa en modal
-        let ventaSeleccionadaActual = null;
+        // Variables globales de estado
+        window.ventaSeleccionadaActual = null;
+        window.inventarioVendedorCargado = [];
+        window.idVentaEstatusActiva = null;
+        window.folioVentaEstatusActiva = null;
 
-        // Cargar detalles de artículos en el modal Desglose Técnico
-        function verDetallesVenta(ventaId) {
-            ventaSeleccionadaActual = ventaId;
+        // 1. Cargar detalles de artículos en el modal Desglose Técnico
+        window.verDetallesVenta = function(ventaId) {
+            window.ventaSeleccionadaActual = ventaId;
             
             fetch(`{{ url('ventas') }}/${ventaId}/detalles-ajax`)
                 .then(res => {
@@ -424,10 +465,23 @@
                     const tbody = document.getElementById('tbl_desglose_body');
                     tbody.innerHTML = '';
 
+                    const esAdmin = {{ (auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador')) ? 'true' : 'false' }};
+
                     data.detalles.forEach(d => {
                         const nombreArt = d.nombre_articulo || (d.articulo ? d.articulo.nombre : 'Artículo');
                         const nSerie = d.numero_serie || 'S/N';
                         const subtotal = (parseFloat(d.precio_unitario) - parseFloat(d.descuento || 0)) * parseInt(d.cantidad);
+
+                        let colCambio = '';
+                        if (esAdmin) {
+                            colCambio = `
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-sm btn-outline-warning text-dark rounded-3 px-2 py-1" onclick="window.abrirModalCambioArticulo('${ventaId}', '${d.id}', '${nombreArt.replace(/'/g, "\\'")}', '${d.precio_unitario}')">
+                                        <i class="bi bi-arrow-repeat me-1"></i> Sustituir
+                                    </button>
+                                </td>
+                            `;
+                        }
 
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
@@ -436,7 +490,7 @@
                             <td class="fw-bold text-dark">${nombreArt}</td>
                             <td class="text-center" id="td_serie_${d.id}">
                                 <span class="badge bg-light text-dark border px-2 py-1 me-1">${nSerie}</span>
-                                <button type="button" class="btn btn-sm btn-outline-primary rounded-3 px-2 py-0" onclick="activarEdicionSerie('${d.id}', '${nSerie}')">
+                                <button type="button" class="btn btn-sm btn-outline-primary rounded-3 px-2 py-0" onclick="window.activarEdicionSerie('${d.id}', '${nSerie}')">
                                     <i class="bi bi-pencil-square"></i> Cambiar
                                 </button>
                             </td>
@@ -452,6 +506,7 @@
                                     </a>
                                 </div>
                             </td>
+                            ${colCambio}
                         `;
                         tbody.appendChild(tr);
                     });
@@ -463,112 +518,115 @@
                     console.error('Error:', err);
                     alert('❌ No se pudieron cargar los detalles de esta venta.');
                 });
-        }
+        };
 
-        // Cargar el historial de abonos vía AJAX
-        function verHistorialPagos(ventaId) {
-            const tbody = document.getElementById('tbl_historial_body');
-            tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span> Cargando historial...</td></tr>`;
+        // 2. Abrir Modal de Cambio de Artículo y solicitar inventario del vendedor
+        window.abrirModalCambioArticulo = function(ventaId, detalleId, nombreArticuloActual, precioActual) {
+            document.getElementById('ca_venta_id').value = ventaId;
+            document.getElementById('ca_detalle_id').value = detalleId;
+            document.getElementById('ca_articulo_actual_nombre').innerText = nombreArticuloActual;
+            document.getElementById('ca_nuevo_precio').value = parseFloat(precioActual).toFixed(2);
+            document.getElementById('ca_input_buscar_articulo').value = '';
+            document.getElementById('ca_nuevo_articulo_id').value = '';
+            document.getElementById('ca_stock_disp').value = '0 pzas';
+            document.getElementById('ca_motivo').value = '';
+            document.getElementById('ca_lista_resultados').classList.add('d-none');
 
-            fetch(`{{ url('ventas') }}/${ventaId}/historial-ajax`)
+            // 1. Ocultar el modal de Desglose Técnico si está abierto para evitar el warning 'aria-hidden'
+            const modalDesgloseEl = document.getElementById('modalDesgloseTecnico');
+            if (modalDesgloseEl) {
+                const modalDesglose = bootstrap.Modal.getInstance(modalDesgloseEl);
+                if (modalDesglose) {
+                    modalDesglose.hide();
+                }
+            }
+
+            // 2. Consultar el inventario validando la respuesta del servidor
+            fetch(`{{ url('ventas') }}/${ventaId}/inventario-vendedor`)
                 .then(res => {
-                    if (!res.ok) throw new Error('Error en el servidor al traer abonos');
+                    if (!res.ok) {
+                        throw new Error(`El servidor respondió con estatus ${res.status}`);
+                    }
                     return res.json();
                 })
                 .then(data => {
-                    document.getElementById('lbl_historial_folio').innerText = data.folio;
-                    document.getElementById('lbl_historial_cliente').innerText = data.cliente;
-                    document.getElementById('lbl_historial_total').innerText = `$${parseFloat(data.total || 0).toFixed(2)}`;
-                    document.getElementById('lbl_historial_saldo').innerText = `$${parseFloat(data.saldo_restante || 0).toFixed(2)}`;
-
-                    tbody.innerHTML = '';
-
-                    if (!data.abonos || data.abonos.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No se han registrado abonos o cobros para esta venta.</td></tr>`;
+                    if (data.status === 'success') {
+                        window.inventarioVendedorCargado = data.articulos;
+                        const modal = new bootstrap.Modal(document.getElementById('modalCambiarArticuloModal'));
+                        modal.show();
                     } else {
-                        data.abonos.forEach((a, index) => {
-                            const npago = a.a_npago !== undefined ? a.a_npago : (index + 1);
-                            const monto = a.a_pago !== undefined ? a.a_pago : (a.monto || a.pago || 0);
-                            const fecha = a.created_at ? new Date(a.created_at).toLocaleDateString('es-MX') : (a.a_fecha || '---');
-
-                            const tr = document.createElement('tr');
-                            tr.innerHTML = `
-                                <td class="ps-3"><span class="badge bg-secondary bg-opacity-10 text-dark border px-2 py-1">Pago #${npago}</span></td>
-                                <td><small class="text-muted fw-semibold">${fecha}</small></td>
-                                <td><span class="small text-dark">${a.observaciones || a.concepto || 'Abono realizado'}</span></td>
-                                <td class="text-end pe-3 fw-bold text-success">+$${parseFloat(monto).toFixed(2)}</td>
-                            `;
-                            tbody.appendChild(tr);
-                        });
+                        alert('❌ Error: ' + (data.message || 'No se pudo consultar el inventario.'));
                     }
-
-                    const modal = new bootstrap.Modal(document.getElementById('modalHistorialPagos'));
-                    modal.show();
                 })
                 .catch(err => {
-                    console.error('Error:', err);
-                    alert('❌ No se pudo cargar el historial de pagos de esta venta.');
+                    console.error(err);
+                    alert('❌ Ocurrió un error al cargar el inventario del vendedor: ' + err.message);
                 });
-        }
+        };
 
-        // Transformar el badge en input para editar N° Serie
-        function activarEdicionSerie(detalleId, serieActual) {
-            const td = document.getElementById(`td_serie_${detalleId}`);
-            td.innerHTML = `
-                <div class="input-group input-group-sm">
-                    <input type="text" id="input_serie_${detalleId}" class="form-control" placeholder="Escriba N/S..." value="${serieActual === 'S/N' ? '' : serieActual}">
-                    <button type="button" class="btn btn-primary" onclick="guardarNuevoSerie('${detalleId}')">
-                        <i class="bi bi-check-lg"></i>
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary" onclick="verDetallesVenta(ventaSeleccionadaActual)">
-                        <i class="bi bi-x-lg"></i>
-                    </button>
-                </div>
-            `;
-        }
+        // 3. Abrir la ventana de sustitución directo desde el modal de estatus
+        window.abrirSustitucionDesdeEstatus = function() {
+            const modalEstatusEl = document.getElementById('modalCambiarEstatus');
+            const modalEstatus = bootstrap.Modal.getInstance(modalEstatusEl);
+            if (modalEstatus) {
+                modalEstatus.hide();
+            }
 
-        // Guardar número de serie por AJAX
-        function guardarNuevoSerie(detalleId) {
-            const nuevoSerie = document.getElementById(`input_serie_${detalleId}`).value;
-            
-            // Usamos url() de Laravel o ruta limpia en JavaScript
-            const url = `{{ url('ventas/detalles') }}/${detalleId}/update-serie`;
+            if (window.idVentaEstatusActiva) {
+                window.verDetallesVenta(window.idVentaEstatusActiva);
+            } else {
+                alert('❌ Ocurrió un detalle al identificar la venta activa.');
+            }
+        };
 
-            fetch(url, {
+        // 4. Guardar cambio de artículo vía AJAX
+        window.guardarCambioArticuloAccion = function() {
+            const ventaId = document.getElementById('ca_venta_id').value;
+            const detalleId = document.getElementById('ca_detalle_id').value;
+            const nuevoArticuloId = document.getElementById('ca_nuevo_articulo_id').value;
+            const nuevoPrecio = document.getElementById('ca_nuevo_precio').value;
+            const motivo = document.getElementById('ca_motivo').value;
+
+            if (!nuevoArticuloId) {
+                alert('⚠️ Selecciona un nuevo artículo de la lista desplegable.');
+                return;
+            }
+
+            if (!nuevoPrecio || parseFloat(nuevoPrecio) < 0) {
+                alert('⚠️ Ingresa un precio unitario válido.');
+                return;
+            }
+
+            fetch(`{{ url('ventas') }}/${ventaId}/cambiar-articulo`, {
                 method: 'POST',
                 headers: {
-                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json'
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
                 },
-                body: JSON.stringify({ numero_serie: nuevoSerie })
+                body: JSON.stringify({
+                    detalle_id: detalleId,
+                    nuevo_articulo_id: nuevoArticuloId,
+                    nuevo_precio: nuevoPrecio,
+                    motivo: motivo
+                })
             })
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'success') {
-                    const td = document.getElementById(`td_serie_${detalleId}`);
-                    td.innerHTML = `
-                        <span class="badge bg-light text-dark border px-2 py-1 me-1">${data.numero_serie}</span>
-                        <button type="button" class="btn btn-sm btn-outline-primary rounded-3 px-2 py-0" onclick="activarEdicionSerie('${detalleId}', '${data.numero_serie}')">
-                            <i class="bi bi-pencil-square"></i> Cambiar
-                        </button>
-                    `;
+                    alert('✅ ' + data.message);
+                    location.reload();
                 } else {
-                    alert('❌ No se pudo actualizar el número de serie.');
+                    alert('❌ Error: ' + data.message);
                 }
             })
             .catch(err => {
-                console.error('Error:', err);
-                alert('❌ Ocurrió un error al intentar guardar el número de serie.');
+                console.error(err);
+                alert('❌ Ocurrió un error al procesar el cambio de artículo.');
             });
-        }
+        };
 
-        function abrirMenuEstatus() {
-            alert('📌 El formulario flotante de Cambio de Estatus por período se integrará en el siguiente paso.');
-        }
-
-        // Cargar el historial de abonos vía AJAX y desplegar el Modal
-        function verHistorialPagos(ventaId) {
+        // 5. Historial de Abonos
+        window.verHistorialPagos = function(ventaId) {
             const tbody = document.getElementById('tbl_historial_body');
             tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span> Cargando historial...</td></tr>`;
 
@@ -583,7 +641,7 @@
                     tbody.innerHTML = '';
 
                     if (!data.abonos || data.abonos.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No se han registrado abonos o cobros para esta venta.</td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No se han registrado abonos para esta venta.</td></tr>`;
                     } else {
                         data.abonos.forEach((a, index) => {
                             const npago = a.a_npago !== undefined ? a.a_npago : (index + 1);
@@ -608,20 +666,69 @@
                     console.error(err);
                     alert('❌ No se pudo cargar el historial de pagos de esta venta.');
                 });
-        }
+        };
 
-        function abrirModalCambioEstatus(ventaId, folioActual, estatusActual, clienteNombre) {
-            idVentaEstatusActiva = ventaId;
-            folioVentaEstatusActiva = folioActual;
+        // 6. Editar número de serie inline
+        window.activarEdicionSerie = function(detalleId, serieActual) {
+            const td = document.getElementById(`td_serie_${detalleId}`);
+            td.innerHTML = `
+                <div class="input-group input-group-sm">
+                    <input type="text" id="input_serie_${detalleId}" class="form-control" placeholder="Escriba N/S..." value="${serieActual === 'S/N' ? '' : serieActual}">
+                    <button type="button" class="btn btn-primary" onclick="window.guardarNuevoSerie('${detalleId}')">
+                        <i class="bi bi-check-lg"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="window.verDetallesVenta(window.ventaSeleccionadaActual)">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `;
+        };
+
+        window.guardarNuevoSerie = function(detalleId) {
+            const nuevoSerie = document.getElementById(`input_serie_${detalleId}`).value;
+            const url = `{{ url('ventas/detalles') }}/${detalleId}/update-serie`;
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ numero_serie: nuevoSerie })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const td = document.getElementById(`td_serie_${detalleId}`);
+                    td.innerHTML = `
+                        <span class="badge bg-light text-dark border px-2 py-1 me-1">${data.numero_serie}</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary rounded-3 px-2 py-0" onclick="window.activarEdicionSerie('${detalleId}', '${data.numero_serie}')">
+                            <i class="bi bi-pencil-square"></i> Cambiar
+                        </button>
+                    `;
+                } else {
+                    alert('❌ No se pudo actualizar el número de serie.');
+                }
+            })
+            .catch(err => {
+                console.error('Error:', err);
+                alert('❌ Ocurrió un error al intentar guardar el número de serie.');
+            });
+        };
+
+        // 7. Modal de Cambio de Estatus
+        window.abrirModalCambioEstatus = function(ventaId, folioActual, estatusActual, clienteNombre) {
+            window.idVentaEstatusActiva = ventaId;
+            window.folioVentaEstatusActiva = folioActual;
 
             document.getElementById('lbl_estatus_folio').innerText = '#' + folioActual;
             document.getElementById('lbl_estatus_cliente').innerText = clienteNombre || 'Sin Cliente Asignado';
 
             const modal = new bootstrap.Modal(document.getElementById('modalCambiarEstatus'));
             modal.show();
-        }
+        };
 
-        // Función de Confirmación de Estatus con SweetAlert2
         window.confirmarCambioEstatus = function(estatusClave, tituloAccion, explicacion) {
             if (typeof Swal !== 'undefined') {
                 Swal.fire({
@@ -639,19 +746,13 @@
                     }
                 });
             } else {
-                // Fallback nativo por si no ha cargado la librería SweetAlert2
                 if (confirm(`¿${tituloAccion}?\n\n${explicacion}`)) {
                     window.ejecutarEnvioEstatus(estatusClave);
                 }
             }
         };
 
-        // Función global para enviar el formulario de cambio de estatus a Laravel
         window.ejecutarEnvioEstatus = function(nuevoEstatus) {
-            if (typeof mostrarCargando === 'function') {
-                mostrarCargando('Actualizando estatus...', 'Por favor espera mientras actualizamos la venta.');
-            }
-
             const form = document.getElementById('form_procesar_estatus');
             const hiddenInput = document.getElementById('hidden_nuevo_estatus');
 
@@ -661,11 +762,56 @@
                 form.submit();
             } else {
                 alert('❌ Error al identificar la venta activa.');
-                if (typeof ocultarCargando === 'function') ocultarCargando();
             }
         };
+
+        // 8. Event Listener Autocomplete
+        document.addEventListener('DOMContentLoaded', function() {
+            const inputBuscar = document.getElementById('ca_input_buscar_articulo');
+            if (inputBuscar) {
+                inputBuscar.addEventListener('input', function() {
+                    const query = this.value.trim().toLowerCase();
+                    const lista = document.getElementById('ca_lista_resultados');
+                    lista.innerHTML = '';
+
+                    if (query.length < 1) {
+                        lista.classList.add('d-none');
+                        return;
+                    }
+
+                    const filtrados = (window.inventarioVendedorCargado || []).filter(item => 
+                        item.nombre.toLowerCase().includes(query) || item.codigo.toString().toLowerCase().includes(query)
+                    );
+
+                    if (filtrados.length === 0) {
+                        lista.innerHTML = '<div class="list-group-item disabled small text-muted">Sin stock disponible para este vendedor</div>';
+                    } else {
+                        filtrados.forEach(item => {
+                            const btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.className = 'list-group-item list-group-item-action py-2';
+                            btn.innerHTML = `<div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong class="d-block text-dark small">${item.nombre}</strong>
+                                    <small class="text-muted">Código: ${item.codigo}</small>
+                                </div>
+                                <span class="badge bg-success rounded-pill">${item.stock} pzas</span>
+                            </div>`;
+                            
+                            btn.onclick = function() {
+                                document.getElementById('ca_input_buscar_articulo').value = item.nombre;
+                                document.getElementById('ca_nuevo_articulo_id').value = item.id;
+                                document.getElementById('ca_nuevo_precio').value = parseFloat(item.precio).toFixed(2);
+                                document.getElementById('ca_stock_disp').value = `${item.stock} pzas`;
+                                lista.classList.add('d-none');
+                            };
+                            lista.appendChild(btn);
+                        });
+                    }
+                    lista.classList.remove('d-none');
+                });
+            }
+        });
     </script>
-
 </div>
-
 @endsection

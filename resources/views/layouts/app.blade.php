@@ -194,6 +194,13 @@
                 </div>
             @endif
 
+            @if(session('error'))
+                <div class="alert alert-danger alert-dismissible fade show rounded-4 border-0 shadow-sm mb-3" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i> {{ session('error') }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            @endif
+
             @if($errors->has('current_password') || $errors->has('new_password'))
                 <div class="alert alert-danger alert-dismissible fade show rounded-3 shadow-sm mb-4" role="alert">
                     <i class="bi bi-exclamation-triangle-fill me-2"></i> Ocurrió un error al intentar cambiar la contraseña. Por favor verifica los campos.

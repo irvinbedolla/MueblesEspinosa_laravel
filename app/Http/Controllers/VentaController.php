@@ -11,6 +11,7 @@ use App\Models\Cliente;
 use App\Models\User;
 use App\Models\Articulo;
 use App\Models\InventarioStock;
+use Illuminate\Support\Facades\Schema;
 
 class VentaController extends Controller
 {
@@ -133,6 +134,21 @@ class VentaController extends Controller
 
                 if ($stock) {
                     $stock->cantidad = $nuevoStock;
+
+                    // Asignación de estatus 'Vendido' y número de venta/folio
+                    if (Schema::hasColumn('inventario_stock', 'condicion')) {
+                        $stock->condicion = 'Vendido';
+                    } elseif (Schema::hasColumn('inventario_stock', 'status')) {
+                        $stock->status = 'Vendido';
+                    }
+
+                    if (Schema::hasColumn('inventario_stock', 'numero_venta')) {
+                        $stock->numero_venta = $venta->folio;
+                    } elseif (Schema::hasColumn('inventario_stock', 'num_venta')) {
+                        $stock->num_venta = $venta->folio;
+                    } elseif (Schema::hasColumn('inventario_stock', 'venta_id')) {
+                        $stock->venta_id = $venta->id;
+                    }
                     $stock->save();
                 }
 
@@ -355,7 +371,7 @@ class VentaController extends Controller
     }
 
     /**
-     * Procesa el cambio de estatus de una venta y gestiona inventario/kardex
+     * Procesa el cambio de estatus de una venta y gestiona inventario/kardex/condición
      */
     public function cambiarEstatusStatus(Request $request, $id)
     {
@@ -365,80 +381,399 @@ class VentaController extends Controller
 
         $nuevoEstatus = $request->nuevo_estatus;
 
-        DB::transaction(function () use ($id, $nuevoEstatus, $request) {
-            $venta = Venta::with(['detalles.articulo', 'cliente'])->findOrFail($id);
-            $estatusAnterior = $venta->status;
+        try {
+            DB::transaction(function () use ($id, $nuevoEstatus, $request) {
+                $venta = Venta::with(['detalles.articulo', 'cliente'])->findOrFail($id);
+                $estatusAnterior = $venta->status;
+                $vendedorId = $venta->vendedor_id ?? $venta->user_id ?? auth()->id();
 
-            // 1. Manejo según el nuevo estatus
-            switch ($nuevoEstatus) {
-                case 'Pagado':
-                    $venta->status = 'Pagado';
-                    $venta->saldo_restante = 0;
-                    break;
+                switch ($nuevoEstatus) {
 
-                case 'Devolucion':
-                case 'Recogido':
-                    $venta->status = $nuevoEstatus;
+                    case 'Pagado':
+                        $venta->status = 'Pagado';
+                        $venta->saldo_restante = 0;
+                        break;
 
-                    // Reintegrar piezas al inventario/Kardex
-                    foreach ($venta->detalles as $detalle) {
-                        // Registrar devolución en Kardex
-                        Kardex::create([
-                            'articulo_id' => $detalle->articulo_id,
-                            'user_id' => auth()->id() ?? $venta->vendedor_id,
-                            'tipo_movimiento' => 'ENTRADA_DEVOLUCION',
-                            'cantidad' => $detalle->cantidad,
-                            'stock_anterior' => 0,
-                            'stock_nuevo' => $detalle->cantidad,
-                            'referencia' => "Devolución/Recogido de Venta #" . $venta->folio,
-                            'observaciones' => "Mercancía devuelta por cambio de estatus a {$nuevoEstatus}",
-                            'fecha_movimiento' => now()
-                        ]);
-                    }
+                    case 'Devolucion':
+                    case 'Recogido':
+                        $venta->status = $nuevoEstatus;
+                        $condicionReingreso = ($nuevoEstatus === 'Devolucion') ? 'Devolución' : 'Recogido';
 
-                    if ($nuevoEstatus === 'Recogido' && $venta->cliente) {
-                        $venta->cliente->status = 'Recogido';
-                        $venta->cliente->save();
-                    }
-                    break;
+                        foreach ($venta->detalles as $detalle) {
 
-                case 'Fuga':
-                case 'Problema':
-                    $venta->status = $nuevoEstatus;
-                    if ($venta->cliente) {
-                        $venta->cliente->status = $nuevoEstatus;
-                        $venta->cliente->save();
-                    }
-                    break;
+                            // 2. Reintegrar piezas al inventario_stock en la columna 'condicion'
+                            $stockItem = InventarioStock::firstOrNew([
+                                'user_id'     => $vendedorId,
+                                'articulo_id' => $detalle->articulo_id,
+                                'condicion'   => $condicionReingreso,
+                            ]);
 
-                case 'Eliminar':
-                    $venta->status = 'Eliminar';
-                    // Liberar los ítems
-                    foreach ($venta->detalles as $detalle) {
-                        Kardex::create([
-                            'articulo_id' => $detalle->articulo_id,
-                            'user_id' => auth()->id() ?? $venta->vendedor_id,
-                            'tipo_movimiento' => 'CANCELACION_VENTA',
-                            'cantidad' => $detalle->cantidad,
-                            'referencia' => "Cancelación Venta #" . $venta->folio,
-                            'fecha_movimiento' => now()
-                        ]);
-                    }
-                    break;
+                            $stockAnterior = $stockItem->exists ? $stockItem->cantidad : 0;
+                            $stockItem->cantidad = $stockAnterior + $detalle->cantidad;
+                            $stockItem->save();
 
-                case 'Pendiente':
-                    $venta->status = 'Pendiente';
-                    break;
+                            // 3. Registrar en Kardex
+                            Kardex::create([
+                                'articulo_id'     => $detalle->articulo_id,
+                                'user_id'         => $vendedorId,
+                                'tipo_movimiento' => 'ENTRADA_DEVOLUCION',
+                                'cantidad'        => $detalle->cantidad,
+                                'stock_anterior'  => $stockAnterior,
+                                'stock_nuevo'     => $stockItem->cantidad,
+                                'referencia'      => "Devolución/Recogido de Venta #" . $venta->folio,
+                                'observaciones'   => "Mercancía reintegrada con condición '{$condicionReingreso}'",
+                                'fecha_movimiento' => now()
+                            ]);
+                        }
 
-                default:
-                    $venta->status = $nuevoEstatus;
-                    break;
-            }
+                        if ($nuevoEstatus === 'Recogido' && $venta->cliente) {
+                            $venta->cliente->status = 'Recogido';
+                            $venta->cliente->save();
+                        }
+                        break;
 
-            $venta->save();
-        });
+                    case 'Fuga':
+                    case 'Problema':
+                        $venta->status = $nuevoEstatus;
 
-        return redirect()->back()->with('success', "El estatus de la venta se actualizó correctamente.");
+                        if ($venta->cliente) {
+                            $venta->cliente->status = $nuevoEstatus;
+                            $venta->cliente->save();
+                        }
+
+                        foreach ($venta->detalles as $detalle) {
+
+                            Kardex::create([
+                                'articulo_id'     => $detalle->articulo_id,
+                                'user_id'         => $vendedorId,
+                                'tipo_movimiento' => ($nuevoEstatus === 'Fuga') ? 'INCIDENCIA_FUGA' : 'INCIDENCIA_PROBLEMA',
+                                'cantidad'        => $detalle->cantidad,
+                                'stock_anterior'  => 0,
+                                'stock_nuevo'     => 0,
+                                'referencia'      => "Incidencia Venta Folio #" . $venta->folio,
+                                'observaciones'   => "Detalle de venta actualizado con estatus '{$nuevoEstatus}'",
+                                'fecha_movimiento' => now()
+                            ]);
+                        }
+                        break;
+
+                    case 'Eliminar':
+                        $venta->status = 'Eliminar';
+
+                        foreach ($venta->detalles as $detalle) {
+                            
+                            $condicionRetorno = 'Nuevo'; // Condición para devolver a inventario disponible
+
+                            // 1. Buscar si ya existe la fila en inventario_stock para esta llave compuesta
+                            $stockExistente = InventarioStock::where('user_id', $vendedorId)
+                                ->where('articulo_id', $detalle->articulo_id)
+                                ->where('condicion', $condicionRetorno)
+                                ->first();
+
+                            $stockAnterior = $stockExistente ? $stockExistente->cantidad : 0;
+                            $nuevoStock = $stockAnterior + $detalle->cantidad;
+
+                            // 2. updateOrCreate garantiza INSERT si no existe o UPDATE sumando la cantidad si ya existe
+                            $stockItem = InventarioStock::updateOrCreate(
+                                [
+                                    'user_id'     => $vendedorId,
+                                    'articulo_id' => $detalle->articulo_id,
+                                    'condicion'   => $condicionRetorno,
+                                ],
+                                [
+                                    'cantidad'    => $nuevoStock
+                                ]
+                            );
+
+                            // 3. Registrar el movimiento en Kardex para auditoría
+                            Kardex::create([
+                                'articulo_id'     => $detalle->articulo_id,
+                                'user_id'         => $vendedorId,
+                                'tipo_movimiento' => 'CANCELACION_VENTA',
+                                'cantidad'        => $detalle->cantidad,
+                                'stock_anterior'  => $stockAnterior,
+                                'stock_nuevo'     => $nuevoStock,
+                                'referencia'      => "Cancelación Venta #" . $venta->folio,
+                                'observaciones'   => "Artículo reintegrado al inventario en condición '{$condicionRetorno}' por eliminación de la venta",
+                                'fecha_movimiento' => now()
+                            ]);
+                        }
+                        break;
+
+                    case 'Pendiente':
+                        if ((float)$venta->saldo_restante <= 0) {
+                            throw new \Exception("No se puede pasar a Pendiente una venta con Saldo Pendiente de $0.00.");
+                        }
+                        $estatusConStockDevuelto = ['Devolucion', 'Recogido', 'Eliminar', 'Descompuesto'];
+
+                        if (in_array($estatusAnterior, $estatusConStockDevuelto)) {
+                            
+                            // Buscar disponibilidad en inventario_stock (asumiendo 'Nuevo' si fue devolución/cancelación)
+                            $condicionBuscada = ($estatusAnterior === 'Devolucion') ? 'Devolución' : (($estatusAnterior === 'Recogido') ? 'Recogido' : 'Nuevo');
+
+                            // 1. Validación previa de existencia
+                            foreach ($venta->detalles as $detalle) {
+                                $stockItem = InventarioStock::where('user_id', $vendedorId)
+                                    ->where('articulo_id', $detalle->articulo_id)
+                                    ->where('condicion', $condicionBuscada)
+                                    ->first();
+
+                                $disponible = $stockItem ? $stockItem->cantidad : 0;
+
+                                if ($disponible < $detalle->cantidad) {
+                                    $nombreProd = $detalle->nombre_articulo ?? ($detalle->articulo->nombre ?? 'Artículo');
+                                    throw new \Exception("Stock insuficiente para reactivar. El vendedor solo cuenta con {$disponible} pza(s) de '{$nombreProd}' en condición '{$condicionBuscada}', pero se requieren {$detalle->cantidad} pza(s).");
+                                }
+                            }
+
+                            // 2. Descontar stock y asignar el numero_venta en inventario_stock
+                            foreach ($venta->detalles as $detalle) {
+                                $stockItem = InventarioStock::where('user_id', $vendedorId)
+                                    ->where('articulo_id', $detalle->articulo_id)
+                                    ->where('condicion', $condicionBuscada)
+                                    ->first();
+
+                                $stockAnterior = $stockItem->cantidad;
+                                $nuevoStock = max(0, $stockAnterior - $detalle->cantidad);
+
+                                $stockItem->cantidad = $nuevoStock;
+                                $stockItem->numero_venta = $venta->folio; // Se asigna el folio en inventario_stock
+                                $stockItem->save();
+
+                                Kardex::create([
+                                    'articulo_id'     => $detalle->articulo_id,
+                                    'user_id'         => $vendedorId,
+                                    'tipo_movimiento' => 'SALIDA_REACTIVACION_VENTA',
+                                    'cantidad'        => $detalle->cantidad,
+                                    'stock_anterior'  => $stockAnterior,
+                                    'stock_nuevo'     => $nuevoStock,
+                                    'referencia'      => "Reactivación Venta #" . $venta->folio,
+                                    'observaciones'   => "Salida de inventario por reactivación a estatus Pendiente",
+                                    'fecha_movimiento' => now()
+                                ]);
+                            }
+                        } else {
+                            foreach ($venta->detalles as $detalle) {
+                                $detalle->status = 'Vendido';
+                                $detalle->save();
+                            }
+                        }
+
+                        if ($venta->cliente && in_array($venta->cliente->status, ['Recogido', 'Fuga', 'Problema'])) {
+                            $venta->cliente->status = 'Activo';
+                            $venta->cliente->save();
+                        }
+
+                        $venta->status = 'Pendiente';
+                        break;
+
+                    default:
+                        $venta->status = $nuevoEstatus;
+                        break;
+                }
+
+                $venta->save();
+            });
+
+            return redirect()->back()->with('success', "Estatus de venta y control de inventario actualizados correctamente.");
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', "❌ Ocurrió un inconveniente: " . $e->getMessage());
+        }
     }
 
+
+    /**
+     * Realiza el cambio de artículo en una venta:
+     * - Retorna existencia del artículo anterior al inventario del vendedor.
+     * - Descuenta existencia del nuevo artículo del inventario del vendedor.
+     * - Actualiza el detalle de la venta (VentaDetalle).
+     * - Recalcula totales de la Venta (Venta).
+     * - Registra movimientos en Kardex para trazabilidad.
+    */
+    public function cambiarArticuloVenta(Request $request, $ventaId)
+    {
+        $request->validate([
+            'detalle_id' => 'required|exists:venta_detalles,id',
+            'nuevo_articulo_id' => 'required|exists:articulos,id',
+            'nuevo_precio' => 'required|numeric|min:0',
+            'motivo' => 'nullable|string|max:255'
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $venta = Venta::with('detalles')->findOrFail($ventaId);
+            $vendedorId = $venta->vendedor_id;
+
+            $detalle = VentaDetalle::where('venta_id', $ventaId)
+                ->where('id', $request->detalle_id)
+                ->firstOrFail();
+
+            $articuloAnteriorId = $detalle->articulo_id;
+            $nuevoArticuloId = $request->nuevo_articulo_id;
+            $cantidad = $detalle->cantidad;
+
+            // Si es el mismo artículo solo se actualizó precio
+            if ($articuloAnteriorId != $nuevoArticuloId) {
+                
+                // 1. Verificar que el vendedor tenga stock suficiente del NUEVO artículo
+                $stockNuevoItem = InventarioStock::where('user_id', $vendedorId)
+                    ->where('articulo_id', $nuevoArticuloId)
+                    ->first();
+
+                if (!$stockNuevoItem || $stockNuevoItem->cantidad < $cantidad) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'El vendedor asignado no tiene stock suficiente de este nuevo artículo.'
+                    ], 422);
+                }
+
+                // 2. Regresar la cantidad del ARTÍCULO ANTERIOR al inventario del vendedor
+                $stockAnteriorItem = InventarioStock::where('user_id', $vendedorId)
+                    ->where('articulo_id', $articuloAnteriorId)
+                    ->first();
+
+                $stockAntViejo = $stockAnteriorItem ? $stockAnteriorItem->cantidad : 0;
+                $stockAntNuevo = $stockAntViejo + $cantidad;
+
+                if ($stockAnteriorItem) {
+                    $stockAnteriorItem->cantidad = $stockAntNuevo;
+                    $stockAnteriorItem->save();
+                } else {
+                    InventarioStock::create([
+                        'user_id' => $vendedorId,
+                        'articulo_id' => $articuloAnteriorId,
+                        'cantidad' => $cantidad
+                    ]);
+                }
+
+                // Registrar en Kardex la devolución/retorno del artículo anterior
+                Kardex::create([
+                    'articulo_id' => $articuloAnteriorId,
+                    'user_id' => $vendedorId,
+                    'tipo_movimiento' => 'RETORNO_CAMBIO_ARTICULO',
+                    'cantidad' => $cantidad,
+                    'stock_anterior' => $stockAntViejo,
+                    'stock_nuevo' => $stockAntNuevo,
+                    'referencia' => "Cambio de artículo en Venta Folio #" . $venta->folio,
+                    'observaciones' => "Entrada por devolución al sustituir artículo en venta. Motivo: " . ($request->motivo ?? 'Cambio directo'),
+                    'fecha_movimiento' => now()
+                ]);
+
+                // 3. Descontar la cantidad del NUEVO ARTÍCULO del inventario del vendedor
+                $stockNueViejo = $stockNuevoItem->cantidad;
+                $stockNueNuevo = max(0, $stockNueViejo - $cantidad);
+
+                $stockNuevoItem->cantidad = $stockNueNuevo;
+                $stockNuevoItem->save();
+
+                // Registrar en Kardex la salida del nuevo artículo
+                Kardex::create([
+                    'articulo_id' => $nuevoArticuloId,
+                    'user_id' => $vendedorId,
+                    'tipo_movimiento' => 'SALIDA_CAMBIO_ARTICULO',
+                    'cantidad' => $cantidad,
+                    'stock_anterior' => $stockNueViejo,
+                    'stock_nuevo' => $stockNueNuevo,
+                    'referencia' => "Cambio de artículo en Venta Folio #" . $venta->folio,
+                    'observaciones' => "Salida por entrega de nuevo artículo sustituto en venta. Motivo: " . ($request->motivo ?? 'Cambio directo'),
+                    'fecha_movimiento' => now()
+                ]);
+
+                // Actualizar los datos del modelo de artículo en el detalle
+                $nuevoArticuloBD = Articulo::find($nuevoArticuloId);
+                $detalle->articulo_id = $nuevoArticuloId;
+                $detalle->nombre_articulo = $nuevoArticuloBD ? $nuevoArticuloBD->nombre : 'Sin Nombre';
+            }
+
+            // 4. Actualizar precios y subtotales en VentaDetalle
+            $nuevoPrecioUnitario = $request->nuevo_precio;
+            $nuevoSubtotal = ($nuevoPrecioUnitario - ($detalle->descuento ?? 0)) * $cantidad;
+
+            $detalle->precio_unitario = $nuevoPrecioUnitario;
+            $detalle->subtotal = $nuevoSubtotal;
+            $detalle->save();
+
+            // 5. Recalcular Totales de la Venta Principal
+            $subtotalVentaNuevo = VentaDetalle::where('venta_id', $ventaId)->sum('subtotal');
+            $totalVentaNuevo = $subtotalVentaNuevo;
+            
+            // Recalcular saldo restante considerando abonos ya pagados
+            $montoAbonado = $venta->total - $venta->saldo_restante;
+            $nuevoSaldoRestante = max(0, $totalVentaNuevo - $montoAbonado);
+
+            $venta->subtotal = $subtotalVentaNuevo;
+            $venta->total = $totalVentaNuevo;
+            $venta->saldo_restante = $nuevoSaldoRestante;
+            $venta->save();
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => '¡Artículo cambiado exitosamente y montos/stocks actualizados!',
+                'venta_id' => $venta->id,
+                'nuevo_total' => $venta->total,
+                'nuevo_saldo' => $venta->saldo_restante
+            ]);
+
+        } catch (Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Ocurrió un error al realizar el cambio de artículo: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtiene el inventario con stock disponible del vendedor asignado a la venta
+     * Desglosado por artículo y por condición (Nuevo, Devolución, Recogido)
+     */
+    public function obtenerInventarioVendedorAjax($ventaId)
+    {
+        try {
+            $venta = Venta::findOrFail($ventaId);
+            
+            // Determinar ID del vendedor de la venta
+            $vendedorId = $venta->vendedor_id ?? $venta->user_id ?? auth()->id();
+
+            // Consultar existencias > 0 en inventario_stock
+            $stocks = InventarioStock::where('user_id', $vendedorId)
+                ->where('cantidad', '>', 0)
+                ->get()
+                ->map(function($st) {
+                    // Buscar el artículo de forma directa por su UUID
+                    $articulo = Articulo::find($st->articulo_id);
+
+                    $nombreArticulo = $articulo ? $articulo->nombre : 'Artículo sin nombre';
+                    $codigoArticulo = $articulo ? ($articulo->barras ?? $articulo->codigo ?? 'S/C') : 'S/C';
+                    $precioArticulo = $articulo ? ($articulo->pcontado ?? $articulo->pcompra ?? 0) : 0;
+
+                    return [
+                        'id'         => $st->articulo_id,
+                        'stock_id'   => $st->id,
+                        'nombre'     => $nombreArticulo . " (" . $st->condicion . ")",
+                        'codigo'     => $codigoArticulo,
+                        'precio'     => (float)$precioArticulo,
+                        'stock'      => (int)$st->cantidad,
+                        'condicion'  => $st->condicion
+                    ];
+                });
+
+            // RESPUESTA CORRECTA EN LARAVEL
+            return response()->json([
+                'status'      => 'success',
+                'vendedor_id' => $vendedorId,
+                'articulos'   => $stocks
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Error al consultar inventario: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

@@ -11,7 +11,7 @@ class InventarioStock extends Model
 
     protected $table = 'inventario_stock';
 
-    protected $fillable = ['id', 'articulo_id', 'user_id', 'cantidad'];
+    protected $fillable = ['id', 'articulo_id', 'user_id', 'cantidad','condicion'];
 
     public function articulo()
     {

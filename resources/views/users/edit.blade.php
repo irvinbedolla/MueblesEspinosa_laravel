@@ -11,6 +11,18 @@
         <h3 class="fw-bold text-dark d-inline-block align-middle m-0">Editar Usuario: {{ $user->username }}</h3>
     </div>
 
+    {{-- ALERTAS DE ERROR DE VALIDACIÓN --}}
+    @if ($errors->any())
+        <div class="alert alert-danger rounded-4 border-0 shadow-sm mb-4">
+            <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill me-2"></i>Por favor corrige los siguientes errores:</div>
+            <ul class="mb-0 ps-3">
+                @foreach ($errors->all() as $error)
+                    <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+
     <form action="{{ route('users.update', $user->id) }}" method="POST">
         @csrf
         @method('PUT')
@@ -18,12 +30,12 @@
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label fw-semibold text-muted">Nombre de Usuario (*)</label>
-                    <input type="text" name="username" class="form-control rounded-3" value="{{ $user->username }}" required>
+                    <input type="text" name="username" class="form-control rounded-3" value="{{ old('username', $user->username) }}" required>
                 </div>
                 
                 <div class="col-md-6">
                     <label class="form-label fw-semibold text-muted">Correo Electrónico (*)</label>
-                    <input type="email" name="email" class="form-control rounded-3" value="{{ $user->email }}" required>
+                    <input type="email" name="email" class="form-control rounded-3" value="{{ old('email', $user->email) }}" required>
                 </div>
 
                 <div class="col-md-6">
@@ -35,8 +47,8 @@
                     <label class="form-label fw-semibold text-muted">Rol Asignado (*)</label>
                     <select name="role_id" class="form-select rounded-3" required>
                         @foreach($roles as $role)
-                            <option value="{{ $role->id }}" {{ $userRoleId === $role->id ? 'selected' : '' }}>
-                                {{ $role->display_name }}
+                            <option value="{{ $role->id }}" {{ (string)$userRoleId === (string)$role->id ? 'selected' : '' }}>
+                                {{ $role->display_name ?? $role->name }}
                             </option>
                         @endforeach
                     </select>

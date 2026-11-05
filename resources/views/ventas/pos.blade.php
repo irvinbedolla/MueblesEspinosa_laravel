@@ -21,7 +21,8 @@
                     <button type="button" class="btn btn-outline-danger rounded-pill px-3 fw-semibold" onclick="resetearVenta()">
                         <i class="bi bi-x-circle me-1"></i> Cancelar Venta
                     </button>
-                    <button type="submit" id="btn_finalizar" class="btn btn-success rounded-pill px-4 fw-bold shadow-sm">
+                    <!-- Botón type="button" directo a prepararResumenVenta() sin disparar form submit -->
+                    <button type="button" id="btn_finalizar" class="btn btn-success rounded-pill px-4 fw-bold shadow-sm" onclick="prepararResumenVenta()">
                         <i class="bi bi-check2-circle me-1"></i> Finalizar Venta Crédito
                     </button>
                 </div>
@@ -549,13 +550,12 @@
     </div>
 </div>
 
-
-
 <script>
 let carrito = [];
 let articulosDB = @json($articulosEnStock);
 let ventaProcesadaId = null;
 let detallesVentaIds = [];
+let ventaFinalizadaExitosamente = false;
 
 // --- FUNCIONES ASIGNACIÓN DESDE MODALES ---
 
@@ -652,9 +652,23 @@ function setDiaCobro(val) {
 function cerrarModal(modalId) {
     const modalEl = document.getElementById(modalId);
     if (modalEl) {
-        const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
-        modal.hide();
+        const instance = bootstrap.Modal.getInstance(modalEl);
+        if (instance) {
+            instance.hide();
+        } else {
+            const newModal = new bootstrap.Modal(modalEl);
+            newModal.hide();
+        }
     }
+    setTimeout(() => {
+        const backdrops = document.querySelectorAll('.modal-backdrop');
+        if (document.querySelectorAll('.modal.show').length === 0) {
+            backdrops.forEach(b => b.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('padding-right');
+            document.body.style.removeProperty('overflow');
+        }
+    }, 200);
 }
 
 function filtrarClientesModal() {
@@ -894,10 +908,22 @@ function renderizarTablaCatalogoModal() {
     const articulosPagina = articulosFiltrados.slice(inicio, fin);
 
     articulosPagina.forEach(art => {
+        let condicionStr = art.condicion || 'Nuevo';
+        let badgeCondicion = '<span class="badge bg-success bg-opacity-10 text-success border border-success ms-2">Nuevo</span>';
+        
+        if (condicionStr === 'Devolución' || condicionStr === 'Devolucion') {
+            badgeCondicion = '<span class="badge bg-warning bg-opacity-10 text-dark border border-warning ms-2">Devolución</span>';
+        } else if (condicionStr === 'Recogido') {
+            badgeCondicion = '<span class="badge bg-danger bg-opacity-10 text-danger border border-danger ms-2">Recogido</span>';
+        }
+
         tbody.innerHTML += `
             <tr>
                 <td>
-                    <strong class="text-dark d-block">${art.nombre}</strong>
+                    <div class="d-flex align-items-center">
+                        <strong class="text-dark d-block">${art.nombre}</strong>
+                        ${badgeCondicion}
+                    </div>
                     <small class="text-muted">${art.marca || ''} ${art.modelo ? '('+art.modelo+')' : ''} | Cod: ${art.barras || 'S/C'}</small>
                 </td>
                 <td class="text-center">
@@ -946,14 +972,8 @@ function cambiarPaginaCatalogo(nuevaPagina) {
     }
 }
 
-// Variable de control para saber si la venta ya fue guardada en BD
-let ventaFinalizadaExitosamente = false;
-
-// Interceptar submit del formulario y abrir Modal Resumen
-document.getElementById('form_venta').addEventListener('submit', function(e) {
-    e.preventDefault();
-
-    // Si la venta ya se guardó, no permitir reabrir para modificar
+// 1. Abrir SOLAMENTE el Modal de Resumen al hacer clic en "Finalizar Venta"
+function prepararResumenVenta() {
     if (ventaFinalizadaExitosamente) {
         alert('⚠️ Esta venta ya fue guardada correctamente. Haz clic en "Nueva Venta" para realizar otra operación.');
         return;
@@ -970,13 +990,14 @@ document.getElementById('form_venta').addEventListener('submit', function(e) {
         return;
     }
 
+    ocultarOverlaysCarga();
+
     const tipo = document.getElementById('tipo_venta').value;
-    document.getElementById('txt_titulo_resumen').innerText = tipo === 'Contado' ? 'Resumen de Venta de Contado' : 'Resumen de Venta a Crédito';
+    document.getElementById('txt_titulo_resumen').innerText = (tipo === 'Contado') ? 'Resumen de Venta de Contado' : 'Resumen de Venta a Crédito';
     document.getElementById('resumen_cliente_nombre').innerText = document.getElementById('lbl_cliente_nombre').innerText;
     document.getElementById('resumen_forma_pago').innerText = document.getElementById('lbl_forma_pago').innerText;
     document.getElementById('resumen_total_venta').innerText = document.getElementById('txt_total').innerText;
 
-    // Estado inicial de botones en el Modal antes de guardar
     document.getElementById('btn_pdf_ticket').disabled = true;
     document.getElementById('btn_pdf_boletas').disabled = true;
     
@@ -984,12 +1005,12 @@ document.getElementById('form_venta').addEventListener('submit', function(e) {
     btnAceptar.disabled = false;
     btnAceptar.innerHTML = '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
 
-    const modalResumen = new bootstrap.Modal(document.getElementById('modalResumenVenta'));
+    const modalResumenEl = document.getElementById('modalResumenVenta');
+    const modalResumen = bootstrap.Modal.getInstance(modalResumenEl) || new bootstrap.Modal(modalResumenEl);
     modalResumen.show();
-});
+}
 
-// Enviar datos por AJAX para guardar Venta, Kardex y Habilitar PDFs
-
+// 2. Enviar la venta a la BD (SOLO cuando el usuario confirma en el modal de resumen)
 function enviarVentaBD() {
     if (ventaFinalizadaExitosamente) return;
 
@@ -997,7 +1018,7 @@ function enviarVentaBD() {
     const footerModal = document.querySelector('#modalResumenVenta .modal-footer');
 
     btnAceptar.disabled = true;
-    btnAceptar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Guardando...';
+    btnAceptar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Guardando cambios...';
 
     const formData = new FormData(document.getElementById('form_venta'));
 
@@ -1011,26 +1032,24 @@ function enviarVentaBD() {
     })
     .then(res => res.json())
     .then(data => {
+        ocultarOverlaysCarga();
+
         if (data.status === 'success') {
             ventaProcesadaId = data.venta_id;
             detallesVentaIds = data.detalles;
-            ventaFinalizadaExitosamente = true; // Marcar como guardada
+            ventaFinalizadaExitosamente = true;
 
-            // 1. Habilitar botones de PDF (Ticket y Boletas)
             document.getElementById('btn_pdf_ticket').disabled = false;
             document.getElementById('btn_pdf_boletas').disabled = false;
 
-            // 2. Bloquear toda la vista POS en el fondo
             document.getElementById('btn_finalizar').disabled = true;
             document.querySelectorAll('#form_venta input, #form_venta button').forEach(el => el.disabled = true);
 
-            // 3. Cambiar la botonera inferior del Modal a "Nueva Venta"
             footerModal.innerHTML = `
-                <button type="button" class="btn btn-primary rounded-3 fw-bold px-4 shadow-sm w-100" onclick="iniciarNuevaVenta()">
+                <button type="button" class="btn btn-primary rounded-3 fw-bold px-4 shadow-sm w-100 py-2" onclick="iniciarNuevaVenta()">
                     <i class="bi bi-plus-circle me-1"></i> Iniciar Nueva Venta
                 </button>
             `;
-
         } else {
             alert('❌ Error: ' + data.message);
             btnAceptar.disabled = false;
@@ -1038,20 +1057,37 @@ function enviarVentaBD() {
         }
     })
     .catch(err => {
+        ocultarOverlaysCarga();
+        console.error(err);
         alert('❌ Ocurrió un error inesperado al procesar la venta.');
         btnAceptar.disabled = false;
         btnAceptar.innerHTML = '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
     });
 }
 
-// Función para reiniciar la pantalla para una nueva venta limpia
+// 3. Destruir cualquier overlay de carga o backdrop traslapado
+function ocultarOverlaysCarga() {
+    const loaderModals = document.querySelectorAll('#modalGuardando, #modalLoading, .loading-overlay');
+    loaderModals.forEach(el => {
+        el.style.display = 'none';
+        const instance = bootstrap.Modal.getInstance(el);
+        if (instance) instance.hide();
+    });
+
+    const backdrops = document.querySelectorAll('.modal-backdrop');
+    if (document.querySelectorAll('.modal.show').length <= 1) {
+        backdrops.forEach((b, idx) => {
+            if (idx > 0) b.remove();
+        });
+    }
+}
+
 function iniciarNuevaVenta() {
-    window.location.reload(); // Recarga la página actual para obtener nuevo Folio y limpiar datos
+    window.location.reload();
 }
 
 function abrirPdfTicket() {
     if (ventaProcesadaId) {
-        // Usa la ruta absoluta basada en la raíz del servidor o Blade
         const url = "{{ url('ventas') }}/" + ventaProcesadaId + "/pdf-ticket";
         window.open(url, '_blank');
     }
@@ -1067,7 +1103,7 @@ function abrirPdfBoletas() {
     }
 }
 
-// INICIALIZACIÓN ÚNICA DEL DOM
+// INICIALIZACIÓN DEL DOM
 document.addEventListener('DOMContentLoaded', () => {
     alternarTipoVenta();
     articulosFiltrados = [...articulosDB];

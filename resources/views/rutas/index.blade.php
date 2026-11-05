@@ -4,20 +4,6 @@
 
 @section('content')
 <div class="container-fluid px-0 px-md-2">
-    
-    @if(session('success'))
-        <div class="alert alert-success alert-dismissible fade show rounded-4 border-0 shadow-sm mb-3" role="alert">
-            <i class="bi bi-check-circle-fill me-2"></i> {{ session('success') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-    @endif
-
-    @if(session('error'))
-        <div class="alert alert-danger alert-dismissible fade show rounded-4 border-0 shadow-sm mb-3" role="alert">
-            <i class="bi bi-exclamation-triangle-fill me-2"></i> {{ session('error') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-    @endif
 
     <!-- ENCABEZADO Y BOTÓN DE NUEVA RUTA -->
     <div class="card border-0 shadow-sm rounded-4 bg-white p-3 p-md-4 mb-3">
