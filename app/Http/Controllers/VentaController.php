@@ -65,7 +65,7 @@ class VentaController extends Controller
 
     /**
      * Guarda la venta en BD, descuenta inventario y genera movimientos en Kardex.
-     */
+    */
     public function store(Request $request)
     {
         $request->validate([
@@ -81,37 +81,78 @@ class VentaController extends Controller
         try {
             DB::beginTransaction();
 
-            $ultimoFolio = Venta::max('folio') ?? 1000;
-            $folio = $ultimoFolio + 1;
+            // 1. Obtener de forma atómica y segura el siguiente folio consecutivo
+            $ultimoFolio = DB::table('ventas')->lockForUpdate()->max('folio');
+            $folio = ($ultimoFolio && $ultimoFolio >= 1000) ? ($ultimoFolio + 1) : 1001;
 
-            // 1. Crear Registro de Venta Principal
+            $montoAnticipo   = floatval($request->anticipo ?? 0);
+            $montoTotal      = floatval($request->total ?? 0);
+            $subtotal        = floatval($request->subtotal ?? $montoTotal);
+            $saldoRestante   = max(0, $montoTotal - $montoAnticipo);
+            $fechaVenta      = $request->fecha_venta ?? date('Y-m-d');
+            $fechaPrimerPago = $request->fecha_primer_pago ?? date('Y-m-d', strtotime('+7 days'));
+
+            // 2. Determinar el estatus real según la naturaleza de la transacción
+            $estatusVenta = 'Pendiente';
+            if ($request->tipo_venta === 'Contado' || $saldoRestante <= 0) {
+                $estatusVenta = 'Pagado';
+            }
+
+            // 3. Crear el registro de la Venta con Folio Único
             $venta = new Venta();
             $venta->folio = $folio;
             $venta->cliente_id = $request->cliente_id;
             $venta->vendedor_id = $request->vendedor_id;
             $venta->cobrador_id = $request->cobrador_id ?? null;
             $venta->tipo_venta = $request->tipo_venta;
-            $venta->fecha_venta = $request->fecha_venta ?? date('Y-m-d');
+            $venta->fecha_venta = $fechaVenta;
             $venta->hora_venta = date('H:i:s');
             $venta->forma_pago = $request->forma_pago ?? 'Efectivo';
-            $venta->subtotal = $request->subtotal;
-            $venta->total = $request->total;
-            $venta->anticipo = $request->anticipo ?? 0;
-            $venta->saldo_restante = max(0, $request->total - ($request->anticipo ?? 0));
+            $venta->subtotal = $subtotal;
+            $venta->total = $montoTotal;
+            $venta->anticipo = $montoAnticipo;
+            $venta->saldo_restante = $saldoRestante;
             $venta->frecuencia_nombre = $request->frecuencia_nombre ?? 'Semanal';
+            $venta->frecuencia_dias = ($request->frecuencia_nombre === 'Quincenal') ? 15 : (($request->frecuencia_nombre === 'Mensual') ? 30 : 7);
             $venta->num_pagos = $request->num_pagos ?? 1;
             $venta->pago_cuota = $request->cuota_pago ?? 0;
-            $venta->fecha_primer_pago = $request->fecha_primer_pago ?? null;
-            $venta->dia_semana = $request->dia_semana ?? null;
-            $venta->status = 'Abierta';
+
+            // Fechas de cobranza
+            $venta->fecha_primer_pago = $fechaPrimerPago;
+            $venta->fecha_final_pago  = $fechaPrimerPago;
+            $venta->dia_semana        = $request->dia_semana ?? null;
+            
+            // Asignación explícita del estatus
+            $venta->status = $estatusVenta;
             $venta->save();
 
-            $vendedorId = $request->vendedor_id;
-            
+            // 4. Registrar anticipo/abono inicial si existe
+            if ($montoAnticipo > 0) {
+                $hoy = now()->format('Y-m-d H:i:s');
+                $usuarioCobrador = auth()->user()->username ?? auth()->user()->id;
 
-            // 2. Procesar cada Artículo de la Venta, Stock y Kardex
+                DB::table('abonos')->insert([
+                    'id'            => (string) \Illuminate\Support\Str::uuid(),
+                    'a_id'          => null,
+                    'a_venta'       => (string) $venta->folio,
+                    'venta_id'      => (string) $venta->id,
+                    'a_pago'        => $montoAnticipo,
+                    'a_fecha'       => $hoy,
+                    'a_npago'       => 1,
+                    'a_cobrador'    => $usuarioCobrador,
+                    'a_tipopago'    => $request->forma_pago ?? 'Efectivo',
+                    'a_tipo'        => 'Anticipo',
+                    'a_hora'        => $hoy,
+                    'observaciones' => 'Pago inicial / Enganche de la venta',
+                    'created_at'    => $hoy,
+                    'updated_at'    => $hoy
+                ]);
+            }
+
+            $vendedorId = $request->vendedor_id;
+
+            // 5. Procesar los artículos de la venta
             foreach ($request->articulos as $item) {
-                // a) Detalle de la venta
                 $articuloBD = \App\Models\Articulo::find($item['id']);
                 $detalle = new VentaDetalle();
                 $detalle->venta_id = $venta->id;
@@ -124,7 +165,7 @@ class VentaController extends Controller
                 $detalle->nombre_articulo = $articuloBD ? $articuloBD->nombre : 'Sin Nombre';
                 $detalle->save();
 
-                // b) Descontar del inventario asignado al vendedor
+                // Descontar inventario
                 $stock = InventarioStock::where('user_id', $vendedorId)
                               ->where('articulo_id', $item['id'])
                               ->first();
@@ -135,7 +176,6 @@ class VentaController extends Controller
                 if ($stock) {
                     $stock->cantidad = $nuevoStock;
 
-                    // Asignación de estatus 'Vendido' y número de venta/folio
                     if (Schema::hasColumn('inventario_stock', 'condicion')) {
                         $stock->condicion = 'Vendido';
                     } elseif (Schema::hasColumn('inventario_stock', 'status')) {
@@ -144,15 +184,11 @@ class VentaController extends Controller
 
                     if (Schema::hasColumn('inventario_stock', 'numero_venta')) {
                         $stock->numero_venta = $venta->folio;
-                    } elseif (Schema::hasColumn('inventario_stock', 'num_venta')) {
-                        $stock->num_venta = $venta->folio;
-                    } elseif (Schema::hasColumn('inventario_stock', 'venta_id')) {
-                        $stock->venta_id = $venta->id;
                     }
                     $stock->save();
                 }
 
-                // c) Registrar movimiento en la tabla Kardex
+                // Kardex
                 $kardex = new Kardex();
                 $kardex->articulo_id = $item['id'];
                 $kardex->user_id = $vendedorId;
@@ -161,8 +197,7 @@ class VentaController extends Controller
                 $kardex->stock_anterior = $stockAnterior;
                 $kardex->stock_nuevo = $nuevoStock;
                 $kardex->tipo_movimiento = "Venta Folio #" . $venta->folio;
-                $kardex->observaciones = "Salida por venta realizada en Venta";
-                //$kardex->fecha_movimiento = now();
+                $kardex->observaciones = "Salida por venta realizada en POS";
                 $kardex->save();
             }
 
@@ -171,11 +206,12 @@ class VentaController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => '¡Venta registrada exitosamente!',
+                'folio' => $venta->folio,
                 'venta_id' => $venta->id,
                 'detalles' => VentaDetalle::where('venta_id', $venta->id)->pluck('id')
             ]);
 
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
                 'status' => 'error',
@@ -184,90 +220,152 @@ class VentaController extends Controller
         }
     }
 
+
     /**
      * Muestra el listado / consulta general de ventas
      */
     public function index(Request $request)
     {
-        // Estatus por defecto al entrar
-        $filtro = $request->get('filtro', 'Abierta');
-        $busqueda = $request->get('buscar', '');
-        $porPagina = $request->get('per_page', 10); // Mostrar 25 por página
+        $filtro      = $request->get('filtro', 'Abierta');
+        $busqueda    = trim($request->get('buscar', ''));
+        $fechaInicio = $request->get('fecha_inicio');
+        $fechaFin    = $request->get('fecha_fin');
+        $porPagina   = $request->get('per_page', 10);
 
-        $query = Venta::with(['cliente', 'vendedor', 'cobrador', 'detalles.articulo'])
-                    ->orderBy('created_at', 'desc');
+        // Iniciar consulta base
+        $query = DB::table('ventas as v')
+            ->select('v.*')
+            ->orderBy('v.created_at', 'desc');
 
-        // Filtros basados en los valores exactos de tu BD
+        // 1. FILTRADO POR ESTATUS SEGÚN PESTAÑA SELECCIONADA
         switch ($filtro) {
             case 'Abierta':
             case 'V_ABIERTAS':
-                $query->where('status', 'Abierta');
+                $query->where('v.status', 'Abierta');
                 break;
 
             case 'Pendiente':
             case 'V_PENDIENTES':
-                $query->where('status', 'Pendiente');
+                $query->where('v.status', 'Pendiente');
                 break;
 
             case 'Pagado':
             case 'V_PAGADAS':
-                $query->where('status', 'Pagado');
+                $query->where('v.status', 'Pagado');
                 break;
 
             case 'V_CREDITO':
-                $query->where('tipo_venta', 'Credito');
+                $query->where('v.tipo_venta', 'Credito');
                 break;
 
             case 'Eliminar':
             case 'V_ELIMINADAS':
-                $query->where('status', 'Eliminar');
+                $query->where('v.status', 'Eliminar');
                 break;
 
             case 'Validar':
-                $query->where('status', 'Validar');
+                $query->where('v.status', 'Validar');
                 break;
 
             case 'Devolucion':
-                $query->where('status', 'Devolucion');
+                $query->where('v.status', 'Devolucion');
                 break;
 
             case 'Recogido':
-                $query->where('status', 'Recogido');
+                $query->where('v.status', 'Recogido');
                 break;
 
             case 'Fuga':
-                $query->where('status', 'Fuga');
+                $query->where('v.status', 'Fuga');
                 break;
 
             case 'LISTA_NEGRA':
-                $query->whereIn('status', ['Fuga', 'Recogido', 'Devolucion', 'Problema', 'Descompuesto']);
+                $query->whereIn('v.status', ['Fuga', 'Recogido', 'Devolucion', 'Problema', 'Descompuesto']);
                 break;
 
             case 'Problema':
-                $query->where('status', 'Problema');
+                $query->where('v.status', 'Problema');
                 break;
 
             case 'Descompuesto':
-                $query->where('status', 'Descompuesto');
+                $query->where('v.status', 'Descompuesto');
                 break;
 
             case 'TODAS':
             default:
-                // Carga las 2,462 ventas
+                // No filtra por estatus
                 break;
         }
 
+        // 2. BÚSQUEDA POR TEXTO (FOLIO / CLIENTE) INDEPENDIENTE
         if (!empty($busqueda)) {
             $query->where(function($q) use ($busqueda) {
-                $q->where('folio', 'like', "%{$busqueda}%")
-                ->orWhereHas('cliente', function($c) use ($busqueda) {
-                    $c->where('nombre', 'like', "%{$busqueda}%");
+                $q->where('v.folio', 'like', "%{$busqueda}%")
+                  ->orWhere('v.id', $busqueda);
+
+                // Buscar coincidencias por nombre en la tabla clientes
+                $q->orWhereIn('v.cliente_id', function($subQuery) use ($busqueda) {
+                    $subQuery->select('id')
+                             ->from('clientes')
+                             ->where('nombre', 'like', "%{$busqueda}%");
+                    
+                    if (Schema::hasColumn('clientes', 'cliente_id')) {
+                        $subQuery->orWhere('cliente_id', 'like', "%{$busqueda}%");
+                    }
                 });
             });
         }
 
-        // Paginación conservando el filtro activo en la URL
-        $ventas = $query->paginate($porPagina)->appends($request->all());
+        // 3. BÚSQUEDA POR RANGO DE FECHAS SEGURA (Soporta Y-m-d y d/m/Y)
+        if (!empty($fechaInicio)) {
+            $fInicio = date('Y-m-d', strtotime(str_replace('/', '-', $fechaInicio)));
+            $query->whereRaw("DATE(v.fecha_venta) >= ?", [$fInicio]);
+        }
+        if (!empty($fechaFin)) {
+            $fFin = date('Y-m-d', strtotime(str_replace('/', '-', $fechaFin)));
+            $query->whereRaw("DATE(v.fecha_venta) <= ?", [$fFin]);
+        }
+
+        // Obtener la paginación de la base de datos
+        $ventasPaginadas = $query->paginate($porPagina)->appends($request->all());
+
+        // 4. ASOCIAR MODELOS DE ELOQUENT MANUALMENTE PARA CONSERVAR RELACIONES EN LA VISTA
+        $ventaIds = collect($ventasPaginadas->items())->pluck('id');
+        
+        $ventasCollection = Venta::with(['vendedor', 'cobrador', 'detalles.articulo'])
+            ->whereIn('id', $ventaIds)
+            ->get()
+            ->keyBy('id');
+
+        // Mapear clientes de forma infalible (soporta UUID e ID Legacy)
+        $clienteIds = $ventasCollection->pluck('cliente_id')->filter()->unique();
+        $clientesMap = DB::table('clientes')
+            ->whereIn('id', $clienteIds)
+            ->when(Schema::hasColumn('clientes', 'cliente_id'), function($q) use ($clienteIds) {
+                $q->orWhereIn('cliente_id', $clienteIds);
+            })
+            ->get()
+            ->keyBy(function($item) {
+                return (string) $item->id;
+            });
+
+        // Reconstruir colección paginada con objetos completos
+        $itemsTransformados = collect($ventasPaginadas->items())->map(function($rawItem) use ($ventasCollection, $clientesMap) {
+            $model = $ventasCollection->get($rawItem->id) ?? (object)$rawItem;
+            
+            $key = (string) $rawItem->cliente_id;
+            if (isset($clientesMap[$key])) {
+                $model->cliente_obj = $clientesMap[$key];
+            } else {
+                $model->cliente_obj = $clientesMap->first(function($c) use ($rawItem) {
+                    return isset($c->cliente_id) && (string)$c->cliente_id === (string)$rawItem->cliente_id;
+                });
+            }
+            return $model;
+        });
+
+        // Reemplazar los items en la paginador original
+        $ventas = $ventasPaginadas->setCollection($itemsTransformados);
 
         return view('ventas.index', compact('ventas', 'filtro', 'busqueda'));
     }
@@ -773,6 +871,56 @@ class VentaController extends Controller
             return response()->json([
                 'status'  => 'error',
                 'message' => 'Error al consultar inventario: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Registra un cliente nuevo vía AJAX y devuelve sus datos para asignación inmediata en el POS.
+     */
+    public function storeClienteAjax(Request $request)
+    {
+        $request->validate([
+            'nombre'   => 'required|string|max:255',
+            'telefono' => 'nullable|string|max:20',
+            'calle'    => 'nullable|string|max:255',
+            'colonia'  => 'nullable|string|max:255',
+            'ciudad'   => 'nullable|string|max:255',
+        ]);
+
+        try {
+            $clienteId = (string) \Illuminate\Support\Str::uuid();
+            $hoy = now()->format('Y-m-d H:i:s');
+
+            DB::table('clientes')->insert([
+                'id'         => $clienteId,
+                'nombre'     => trim($request->nombre),
+                'telefono'   => trim($request->telefono),
+                'calle'      => trim($request->calle),
+                'colonia'    => trim($request->colonia),
+                'ciudad'     => trim($request->ciudad),
+                'status'     => 'Activo',
+                'created_at' => $hoy,
+                'updated_at' => $hoy,
+            ]);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => '¡Cliente registrado y asignado correctamente!',
+                'cliente' => [
+                    'id'       => $clienteId,
+                    'nombre'   => trim($request->nombre),
+                    'telefono' => trim($request->telefono),
+                    'colonia'  => trim($request->colonia),
+                    'ciudad'   => trim($request->ciudad),
+                    'calle'    => trim($request->calle),
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Ocurrió un error al guardar el cliente: ' . $e->getMessage()
             ], 500);
         }
     }

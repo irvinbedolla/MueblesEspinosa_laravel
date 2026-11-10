@@ -57,6 +57,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/ventas/store', [VentaController::class, 'store'])->name('ventas.store');
     Route::get('/ventas/{id}/pdf-ticket', [VentaPdfController::class, 'ticket'])->name('ventas.pdf.ticket');
     Route::get('/ventas/{id}/pdf-boleta/{detalleId}', [VentaPdfController::class, 'boleta'])->name('ventas.pdf.boleta');
+    Route::post('ventas/clientes/ajax-store', [VentaController::class, 'storeClienteAjax'])->name('ventas.clientes.storeAjax');    
 
     Route::get('/ventas/{id}/continuar', [VentaController::class, 'continuarPOS'])->name('ventas.continuar');
     Route::patch('/ventas/{id}/pendiente', [VentaController::class, 'pasarAPendiente'])->name('ventas.pendiente');
@@ -138,4 +139,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/ventas/{venta}/inventario-vendedor', [VentaController::class, 'obtenerInventarioVendedorAjax'])->name('ventas.inventario_vendedor');
     Route::post('/ventas/{venta}/cambiar-articulo', [VentaController::class, 'cambiarArticuloVenta'])->name('ventas.cambiar_articulo');
     Route::post('/ventas/{id}/cambiar-estatus', [VentaController::class, 'cambiarEstatusStatus'])->name('ventas.cambiar_estatus');
+
+
+
 });

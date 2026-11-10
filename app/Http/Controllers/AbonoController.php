@@ -10,21 +10,54 @@ use Carbon\Carbon;
 
 class AbonoController extends Controller
 {
+
+
     /**
      * Vista principal de Abonos
-     */
+    */
     public function index(Request $request)
     {
         $user = auth()->user();
-        // $tipoSeccion = 0 para Administrador (acceso total), 1 para Cobrador (solo asignadas)
         $tipoSeccion = $user->isAdmin() ? 0 : 1;
 
         $tipoAbono      = $request->input('tipo', 1);
         $dia            = $request->input('Dia', '');
         $filtroCobrador = $request->input('cobrador', 0);
 
-        // Consulta de ventas pendientes de cobro
-        $query = DB::table('ventas as v')
+        // 1. Consulta base de IDs de ventas pendientes
+        $idsQuery = DB::table('ventas as v')
+            ->whereNotIn('v.status', ['Pagado', 'Eliminar', 'Devolucion', 'Recogido'])
+            ->where('v.saldo_restante', '>', 0);
+
+        // Filtro por Rol (Si no es Admin, solo ve sus cobros asignados)
+        if ($tipoSeccion != 0) {
+            $idsQuery->where(function($q) use ($user) {
+                $q->where('v.cobrador_id', $user->id);
+                if (!empty($user->user_id_legacy)) {
+                    $q->orWhere('v.cobrador_id', $user->user_id_legacy);
+                }
+            });
+        } 
+        // Filtro por Cobrador Seleccionado
+        else if (!empty($filtroCobrador) && $filtroCobrador != '0') {
+            $idsQuery->where(function($q) use ($filtroCobrador) {
+                $q->where('v.cobrador_id', $filtroCobrador);
+                if (is_numeric($filtroCobrador)) {
+                    $q->orWhere('v.cobrador_id', $filtroCobrador);
+                }
+            });
+        }
+
+        // Filtro por Día de la Semana
+        if (!empty($dia) && $dia != 'Todos') {
+            $idsQuery->where('v.dia_semana', $dia);
+        }
+
+        // Obtener los IDs de venta únicos sin duplicación
+        $ventasIds = $idsQuery->distinct()->pluck('v.id');
+
+        // 2. Consulta de datos formateados trayendo solo los IDs únicos obtenidos
+        $ventas = DB::table('ventas as v')
             ->select(
                 'v.id',
                 'v.folio',
@@ -46,58 +79,12 @@ class AbonoController extends Controller
                 'u_ven.username as vendedor_nombre',
                 'u_cob.username as cobrador_nombre'
             )
-            // Left Join Clientes (Soporta UUID e ID Legacy)
-            ->leftJoin('clientes as c', function($join) {
-                $join->on('v.cliente_id', '=', 'c.id');
-                if (Schema::hasColumn('clientes', 'cliente_id')) {
-                    $join->orOn('v.cliente_id', '=', 'c.cliente_id');
-                }
-            })
-            // Left Join Vendedor
-            ->leftJoin('users as u_ven', function($join) {
-                $join->on('v.vendedor_id', '=', 'u_ven.id');
-                if (Schema::hasColumn('users', 'user_id_legacy')) {
-                    $join->orOn('v.vendedor_id', '=', 'u_ven.user_id_legacy');
-                }
-            })
-            // Left Join Cobrador
-            ->leftJoin('users as u_cob', function($join) {
-                $join->on('v.cobrador_id', '=', 'u_cob.id');
-                if (Schema::hasColumn('users', 'user_id_legacy')) {
-                    $join->orOn('v.cobrador_id', '=', 'u_cob.user_id_legacy');
-                }
-            })
-            // Filtro estricto: Solo ventas pendientes con saldo pendiente mayor a $0
-            ->whereNotIn('v.status', ['Pagado', 'Eliminar', 'Devolucion', 'Recogido'])
-            ->where('v.saldo_restante', '>', 0);
-
-        // 1. Filtro por Rol (Si no es Admin, solo ve sus cobros asignados)
-        if ($tipoSeccion != 0) {
-            $query->where(function($q) use ($user) {
-                $q->where('v.cobrador_id', $user->id);
-                if (!empty($user->user_id_legacy)) {
-                    $q->orWhere('v.cobrador_id', $user->user_id_legacy);
-                }
-            });
-        } 
-        // 2. Filtro por Cobrador Seleccionado (Si es Admin y aplicó el filtro)
-        else if (!empty($filtroCobrador) && $filtroCobrador != '0') {
-            $query->where(function($q) use ($filtroCobrador) {
-                $q->where('v.cobrador_id', $filtroCobrador);
-                // Si el ID enviado es entero/legacy, también buscar por la columna legacy
-                if (is_numeric($filtroCobrador)) {
-                    $q->orWhere('v.cobrador_id', $filtroCobrador);
-                }
-            });
-        }
-
-        // 3. Filtro por Día de la Semana
-        if (!empty($dia) && $dia != 'Todos') {
-            $query->where('v.dia_semana', $dia);
-        }
-
-        // Ordenamiento por fecha de venta (las más antiguas primero para priorizar atrasos)
-        $ventas = $query->orderBy('v.fecha_venta', 'asc')->get();
+            ->leftJoin('clientes as c', 'v.cliente_id', '=', 'c.id')
+            ->leftJoin('users as u_ven', 'v.vendedor_id', '=', 'u_ven.id')
+            ->leftJoin('users as u_cob', 'v.cobrador_id', '=', 'u_cob.id')
+            ->whereIn('v.id', $ventasIds)
+            ->orderBy('v.fecha_venta', 'asc')
+            ->get();
 
         // Obtener lista de cobradores activos para el selector/filtro
         $cobradores = DB::table('users')
@@ -125,26 +112,12 @@ class AbonoController extends Controller
 
         // 1. Obtener la venta
         $venta = DB::table('ventas as v')
-            ->select(
-                'v.*',
-                'c.id as cliente_id_real',
-                'c.nombre as cliente_nombre',
-                'c.colonia as cliente_colonia',
-                'c.ciudad as cliente_ciudad',
-                'c.calle as cliente_calle',
-                'c.telefono as cliente_telefono'
-            )
-            ->leftJoin('clientes as c', function($join) {
-                $join->on('v.cliente_id', '=', 'c.id');
-                if (Schema::hasColumn('clientes', 'cliente_id')) {
-                    $join->orOn('v.cliente_id', '=', 'c.cliente_id');
-                }
-            })
+            ->select('v.*')
             ->where(function($q) use ($id) {
                 $q->where('v.id', $id);
                 if (!empty($id) && $id != '0') {
                     $q->orWhere('v.venta_id_legacy', $id)
-                    ->orWhere('v.folio', $id);
+                      ->orWhere('v.folio', $id);
                 }
             })
             ->first();
@@ -153,12 +126,23 @@ class AbonoController extends Controller
             return redirect()->route('abonos.index')->with('error', 'No se encontró la venta especificada.');
         }
 
+        // Obtener el cliente específico vinculado a la venta
+        $clienteDB = null;
+        if (!empty($venta->cliente_id)) {
+            $clienteDB = DB::table('clientes')
+                ->where('id', $venta->cliente_id)
+                ->when(Schema::hasColumn('clientes', 'cliente_id'), function($q) use ($venta) {
+                    $q->orWhere('cliente_id', $venta->cliente_id);
+                })
+                ->first();
+        }
+
         $cliente = (object) [
-            'id'       => $venta->cliente_id_real ?? $venta->cliente_id ?? null,
-            'nombre'   => $venta->cliente_nombre ?? 'Cliente General',
-            'colonia'  => $venta->cliente_colonia ?? '',
-            'ciudad'   => $venta->cliente_ciudad ?? '',
-            'telefono' => $venta->cliente_telefono ?? ''
+            'id'       => $clienteDB->id ?? $venta->cliente_id ?? null,
+            'nombre'   => $clienteDB->nombre ?? 'Cliente General',
+            'colonia'  => $clienteDB->colonia ?? '',
+            'ciudad'   => $clienteDB->ciudad ?? '',
+            'telefono' => $clienteDB->telefono ?? ''
         ];
 
         // 2. Historial de abonos

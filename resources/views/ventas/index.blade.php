@@ -15,25 +15,28 @@
         </div>
 
         <div class="d-flex flex-wrap gap-2 pt-2 border-top">
-            <a href="{{ route('ventas.index', ['filtro' => 'Abierta']) }}" class="btn {{ ($filtro ?? 'Abierta') === 'Abierta' ? 'btn-primary' : 'btn-outline-primary' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+            @php
+                $params = request()->except('page');
+            @endphp
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Abierta'])) }}" class="btn {{ ($filtro ?? 'Abierta') === 'Abierta' ? 'btn-primary' : 'btn-outline-primary' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Abiertas
             </a>
-            <a href="{{ route('ventas.index', ['filtro' => 'Pendiente']) }}" class="btn {{ ($filtro ?? '') === 'Pendiente' ? 'btn-warning text-dark' : 'btn-outline-warning text-dark' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Pendiente'])) }}" class="btn {{ ($filtro ?? '') === 'Pendiente' ? 'btn-warning text-dark' : 'btn-outline-warning text-dark' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Pendientes
             </a>
-            <a href="{{ route('ventas.index', ['filtro' => 'TODAS']) }}" class="btn {{ ($filtro ?? '') === 'TODAS' ? 'btn-secondary' : 'btn-outline-secondary' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'TODAS'])) }}" class="btn {{ ($filtro ?? '') === 'TODAS' ? 'btn-secondary' : 'btn-outline-secondary' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 Todas
             </a>
-            <a href="{{ route('ventas.index', ['filtro' => 'Pagado']) }}" class="btn {{ ($filtro ?? '') === 'Pagado' ? 'btn-success' : 'btn-outline-success' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Pagado'])) }}" class="btn {{ ($filtro ?? '') === 'Pagado' ? 'btn-success' : 'btn-outline-success' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Pagadas
             </a>
-            <a href="{{ route('ventas.index', ['filtro' => 'V_CREDITO']) }}" class="btn {{ ($filtro ?? '') === 'V_CREDITO' ? 'btn-info text-white' : 'btn-outline-info' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'V_CREDITO'])) }}" class="btn {{ ($filtro ?? '') === 'V_CREDITO' ? 'btn-info text-white' : 'btn-outline-info' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Crédito
             </a>
-            <a href="{{ route('ventas.index', ['filtro' => 'Eliminar']) }}" class="btn {{ ($filtro ?? '') === 'Eliminar' ? 'btn-danger' : 'btn-outline-danger' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Eliminar'])) }}" class="btn {{ ($filtro ?? '') === 'Eliminar' ? 'btn-danger' : 'btn-outline-danger' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Eliminadas
             </a>
-            <a href="{{ route('ventas.index', ['filtro' => 'LISTA_NEGRA']) }}" class="btn {{ ($filtro ?? '') === 'LISTA_NEGRA' ? 'btn-dark' : 'btn-outline-dark' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'LISTA_NEGRA'])) }}" class="btn {{ ($filtro ?? '') === 'LISTA_NEGRA' ? 'btn-dark' : 'btn-outline-dark' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 Lista Negra
             </a>
         </div>
@@ -107,7 +110,9 @@
                                 <small class="text-muted">Folio #{{ $v->folio }}</small>
                             </td>
                             <td>
-                                <strong class="text-dark d-block">{{ $v->cliente->nombre ?? 'Sin Cliente Asignado' }}</strong>
+                                <strong class="text-dark d-block">
+                                    {{ $v->cliente_obj->nombre ?? ($v->cliente->nombre ?? 'Sin Cliente Asignado') }}
+                                </strong>
                             </td>
                             <td class="text-muted small">
                                 {{ strtoupper($v->vendedor->username ?? 'SIN VENDEDOR') }}

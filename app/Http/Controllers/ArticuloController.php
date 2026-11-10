@@ -176,12 +176,15 @@ class ArticuloController extends Controller
             'nombre'     => 'required|string|max:100',
             'pcompra'    => 'required|numeric|min:0',
             'pcontado'   => 'required|numeric|min:0',
-            'porcentaje' => 'required|numeric|min:0',
+            'porcentaje' => 'nullable|numeric|min:0',
             'stock_min'  => 'required|integer|min:0',
         ]);
 
         DB::transaction(function () use ($request, $articulo) {
-            $pcredito = $request->pcompra + ($request->pcompra * ($request->porcentaje / 100));
+            $porcentaje = floatval($request->porcentaje ?? 0);
+            
+            // 1. Corrección del error de sintaxis en el cálculo de pcredito
+            $pcredito = $request->pcompra + ($request->pcompra * ($porcentaje / 100));
 
             $articulo->update([
                 'nombre'      => mb_strtoupper(trim($request->nombre)),
@@ -194,15 +197,59 @@ class ArticuloController extends Controller
                 'pcompra'     => $request->pcompra,
                 'pcontado'    => $request->pcontado,
                 'pcredito'    => $pcredito,
-                'porcentaje'  => $request->porcentaje,
+                'porcentaje'  => $porcentaje,
                 'stock_min'   => $request->stock_min,
             ]);
 
-            // Re-calcular o actualizar la tabla de precios
-            $this->generarPreciosCredito($articulo->id, $pcredito, $request->input('precios_custom', []));
+            // 2. Re-calcular o actualizar la tabla de precios
+            $this->generarPreciosCredito($articulo->id, floatval($request->pcompra), $request->input('precios_custom', []));
         });
 
         return redirect()->route('articulos.index')->with('success', 'Artículo actualizado con éxito.');
+    }
+
+    /**
+     * Lógica para calcular la tabla de precios sugeridos a meses
+     */
+    private function generarPreciosCredito(string $articuloId, float $pcompra, array $preciosCustom = [])
+    {
+        // Porcentajes de utilidad directa sobre el precio de compra
+        $porcentajesUtilidad = [
+            1 => 40, 2 => 35, 3 => 30, 4 => 25, 
+            5 => 20, 6 => 15, 7 => 10, 8 => 5,
+            9 => 0,  10 => 0, 11 => 0, 12 => 0
+        ];
+
+        for ($m = 1; $m <= 12; $m++) {
+            // Prioriza el precio manual introducido por el usuario en la vista
+            if (isset($preciosCustom[$m]) && floatval($preciosCustom[$m]) > 0) {
+                $precioTotal = floatval($preciosCustom[$m]);
+            } else {
+                $utilidadPct = $porcentajesUtilidad[$m] ?? 0;
+                // Corrección del error de sintaxis en el cálculo de la utilidad
+                $montoUtilidad = $pcompra * ($utilidadPct / 100);
+                $precioTotal = $pcompra + $montoUtilidad;
+            }
+
+            // Evitar regenerar UUIDs al actualizar los precios existentes
+            $registroExistente = ArticuloPrecio::where('articulo_id', $articuloId)
+                ->where('meses', $m)
+                ->first();
+
+            $idUsar = $registroExistente ? $registroExistente->id : Str::uuid()->toString();
+
+            ArticuloPrecio::updateOrCreate(
+                [
+                    'articulo_id' => $articuloId, 
+                    'meses'       => $m
+                ],
+                [
+                    'id'           => $idUsar,
+                    'precio_total' => round($precioTotal, 2),
+                    'pago_mensual' => round($precioTotal / $m, 2),
+                ]
+            );
+        }
     }
 
     /**
@@ -287,38 +334,6 @@ class ArticuloController extends Controller
             ->paginate(20);
 
         return view('articulos.kardex', compact('movimientos'));
-    }
-
-    /**
-     * Lógica para calcular la tabla de precios sugeridos a meses
-     */
-    private function generarPreciosCredito(string $articuloId, float $pcompra, array $preciosCustom = [])
-    {
-        // Porcentajes de utilidad directa sobre el precio de compra
-        $porcentajesUtilidad = [
-            1 => 40, 2 => 35, 3 => 30, 4 => 25, 
-            5 => 20, 6 => 15, 7 => 10, 8 => 5,
-            9 => 0,  10 => 0, 11 => 0, 12 => 0
-        ];
-
-        for ($m = 1; $m <= 12; $m++) {
-            if (isset($preciosCustom[$m]) && floatval($preciosCustom[$m]) > 0) {
-                $precioTotal = floatval($preciosCustom[$m]);
-            } else {
-                $utilidadPct = $porcentajesUtilidad[$m] ?? 0;
-                $montoUtilidad = $pcompra * ($utilidadPct / 100);
-                $precioTotal = $pcompra + $montoUtilidad;
-            }
-
-            ArticuloPrecio::updateOrCreate(
-                ['articulo_id' => $articuloId, 'meses' => $m],
-                [
-                    'id'           => Str::uuid()->toString(),
-                    'precio_total' => round($precioTotal, 2),
-                    'pago_mensual' => round($precioTotal / $m, 2),
-                ]
-            );
-        }
     }
 
     /**

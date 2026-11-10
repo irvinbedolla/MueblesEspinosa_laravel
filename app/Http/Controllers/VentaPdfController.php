@@ -9,6 +9,8 @@ use App\Models\Cliente;
 use App\Models\User;
 use App\Models\Articulo;
 use FPDF;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 class VentaPdfController extends Controller
 {
@@ -17,9 +19,42 @@ class VentaPdfController extends Controller
      */
     public function ticket($id)
     {
-        $venta = Venta::with(['cliente', 'vendedor', 'detalles.articulo'])->findOrFail($id);
 
-        $pdf = new FPDF('P', 'mm', array(54, 130));
+        // 1. Obtener los datos generales de la Venta
+        $venta = DB::table('ventas')
+            ->where(function($q) use ($id) {
+                $q->where('id', $id)
+                  ->orWhere('folio', $id);
+                if (Schema::hasColumn('ventas', 'venta_id_legacy')) {
+                    $q->orWhere('venta_id_legacy', $id);
+                }
+            })
+            ->first();
+
+        if (!$venta) {
+            abort(404, "No se encontró la venta con el identificador: {$id}");
+        }
+
+        // 2. Obtener la información del Cliente
+        $venta->cliente = DB::table('clientes')
+            ->where('id', $venta->cliente_id)
+            ->first();
+
+        // 3. Obtener la información del Vendedor
+        $venta->vendedor = DB::table('users')
+            ->where('id', $venta->vendedor_id)
+            ->orWhere('user_id_legacy', $venta->vendedor_id)
+            ->first();
+
+        // 4. Obtener los detalles de los artículos (ASIGNA LA PROPIEDAD $detalles)
+        $venta->detalles = DB::table('venta_detalles as vd')
+            ->select('vd.*', 'a.nombre as nombre_catalogo')
+            ->leftJoin('articulos as a', 'vd.articulo_id', '=', 'a.id')
+            ->where('vd.venta_id', $venta->id)
+            ->get();
+
+        // 5. Generación del documento FPDF
+        $pdf = new \FPDF('P', 'mm', array(54, 130));
         $pdf->AddPage();
         $pdf->SetMargins(0, 0, 0);
         $pdf->SetAutoPageBreak(true, 0);
@@ -84,16 +119,53 @@ class VentaPdfController extends Controller
      */
     public function boleta($ventaId, $detalleId)
     {
-        $venta = Venta::with(['cliente', 'vendedor'])->findOrFail($ventaId);
-        $va = VentaDetalle::with('articulo')->where('venta_id', $ventaId)->where('id', $detalleId)->firstOrFail();
+        // 1. Consultar la Venta de forma segura por UUID, Folio o ID Legacy
+        $venta = DB::table('ventas')
+            ->where(function($q) use ($ventaId) {
+                $q->where('id', $ventaId)
+                  ->orWhere('folio', $ventaId);
+                if (Schema::hasColumn('ventas', 'venta_id_legacy')) {
+                    $q->orWhere('venta_id_legacy', $ventaId);
+                }
+            })
+            ->first();
 
+        if (!$venta) {
+            abort(404, "No se encontró la venta especificada: {$ventaId}");
+        }
+
+        // 2. Cargar Cliente y Vendedor
+        $cliente = DB::table('clientes')->where('id', $venta->cliente_id)->first();
+        $vendedor = DB::table('users')
+            ->where('id', $venta->vendedor_id)
+            ->orWhere('user_id_legacy', $venta->vendedor_id)
+            ->first();
+
+        // 3. Consultar el Detalle de Venta específico con su Artículo
+        $va = DB::table('venta_detalles as vd')
+            ->select('vd.*', 'a.nombre as articulo_nombre', 'a.marca as articulo_marca', 'a.modelo as articulo_modelo')
+            ->leftJoin('articulos as a', 'vd.articulo_id', '=', 'a.id')
+            ->where('vd.id', $detalleId)
+            ->where(function($q) use ($venta) {
+                $q->where('vd.venta_id', $venta->id);
+                if (!empty($venta->folio)) {
+                    $q->orWhere('vd.venta_id', $venta->folio);
+                }
+            })
+            ->first();
+
+        if (!$va) {
+            abort(404, "No se encontró el detalle de la venta especificado.");
+        }
+
+        // 4. Cálculos de Pagos y Amortizaciones
         $frecuencia = $venta->frecuencia_nombre ?? 'Semanal';
-        $pagos = $venta->num_pagos ?? 1;
+        $pagos = intval($venta->num_pagos ?? 1);
 
         $n_pagos = match($frecuencia) {
-            'Semanal' => $pagos * 4,
+            'Semanal'   => $pagos * 4,
             'Quincenal' => $pagos * 2,
-            default => $pagos,
+            default     => $pagos,
         };
 
         $venta_total = $venta->total;
