@@ -29,15 +29,20 @@
 
     <div class="row g-3 mb-4">
         @foreach($permissionsByModule as $module => $permissions)
+            @php $modSlug = \Illuminate\Support\Str::slug($module); @endphp
             <div class="col-md-6 col-lg-4">
                 <div class="card border-0 shadow-sm rounded-4 h-100 bg-white">
-                    <div class="card-header bg-light border-0 fw-bold text-primary py-3">
-                        <i class="bi bi-folder2-open me-1"></i> {{ $module }}
+                    <div class="card-header bg-light border-0 fw-bold text-primary py-3 d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-folder2-open me-1"></i> {{ $module }}</span>
+                        <button type="button" class="btn btn-sm btn-link text-decoration-none p-0 small fw-semibold" onclick="toggleModulo('{{ $modSlug }}')">
+                            Todos
+                        </button>
                     </div>
                     <div class="card-body">
                         @foreach($permissions as $perm)
                             <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" name="permissions[]" value="{{ $perm->id }}" id="perm_{{ $perm->id }}">
+                                <input class="form-check-input check-mod-{{ $modSlug }}" type="checkbox" name="permissions[]" value="{{ $perm->id }}" id="perm_{{ $perm->id }}"
+                                    {{ (isset($rolePermissions) && in_array($perm->id, $rolePermissions)) ? 'checked' : '' }}>
                                 <label class="form-check-label small text-dark fw-medium" for="perm_{{ $perm->id }}">
                                     {{ $perm->display_name }}
                                 </label>
@@ -49,8 +54,24 @@
         @endforeach
     </div>
 
+    <script>
+        function toggleModulo(slug) {
+            const checks = document.querySelectorAll('.check-mod-' + slug);
+            const algunoSinMarcar = Array.from(checks).some(c => !c.checked);
+            checks.forEach(c => c.checked = algunoSinMarcar);
+        }
+    </script>
+
     <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold shadow-sm">
         <i class="bi bi-save me-1"></i> Guardar Rol
     </button>
 </form>
 @endsection
+
+<script>
+    function toggleModulo(slug) {
+        const checks = document.querySelectorAll('.check-mod-' + slug);
+        const algunoSinMarcar = Array.from(checks).some(c => !c.checked);
+        checks.forEach(c => c.checked = algunoSinMarcar);
+    }
+</script>

@@ -8,9 +8,11 @@
         <h3 class="fw-bold text-dark m-0"><i class="bi bi-people text-primary me-2"></i>Catálogo de Clientes</h3>
         <p class="text-muted small m-0">Administra los datos de contacto y ubicaciones geográficas</p>
     </div>
-    <a href="{{ route('clientes.create') }}" class="btn btn-primary rounded-pill px-4 fw-semibold shadow-sm">
-        <i class="bi bi-person-plus me-1"></i> Nuevo Cliente
-    </a>
+    @if(auth()->user()->tienePermiso('clientes.create'))
+        <a href="{{ route('clientes.create') }}" class="btn btn-primary rounded-pill px-4 fw-semibold shadow-sm">
+            <i class="bi bi-person-plus me-1"></i> Nuevo Cliente
+        </a>
+    @endif
 </div>
 
 <!-- TARJETAS DE RESUMEN METRICO -->
@@ -107,7 +109,9 @@
                     <th>Ciudad</th>
                     <th class="text-center">Estatus</th>
                     <th class="text-center">Ubicación GPS</th>
-                    <th class="text-end pe-4">Acciones</th>
+                    @if(auth()->user()->tienePermiso('clientes.edit') || auth()->user()->tienePermiso('clientes.delete'))
+                        <th class="text-end pe-4">Acciones</th>
+                    @endif
                 </tr>
             </thead>
             <tbody>
@@ -140,18 +144,25 @@
                                 <span class="text-muted small">-</span>
                             @endif
                         </td>
-                        <td class="text-end pe-4">
-                            <a href="{{ route('clientes.edit', $cliente->id) }}" class="btn btn-sm btn-outline-primary rounded-circle me-1" title="Editar">
-                                <i class="bi bi-pencil"></i>
-                            </a>
-                            <form action="{{ route('clientes.destroy', $cliente->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Seguro que deseas eliminar este cliente?');">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
-                        </td>
+                        @if(auth()->user()->tienePermiso('clientes.edit') || auth()->user()->tienePermiso('clientes.delete'))
+                            <td class="text-end pe-4">
+                                @if(auth()->user()->tienePermiso('clientes.edit'))
+                                    <a href="{{ route('clientes.edit', $cliente->id) }}" class="btn btn-sm btn-outline-primary rounded-circle me-1" title="Editar">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                @endif
+
+                                @if(auth()->user()->tienePermiso('clientes.delete'))
+                                    <form action="{{ route('clientes.destroy', $cliente->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Seguro que deseas eliminar este cliente?');">
+                                        @csrf
+                                        @method('DELETE')
+                                        <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                @endif
+                            </td>
+                        @endif
                     </tr>
                 @empty
                     <tr>

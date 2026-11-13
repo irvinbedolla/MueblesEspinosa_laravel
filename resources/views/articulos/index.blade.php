@@ -16,15 +16,21 @@
     <!-- ACCIONES SOLO VISIBLES PARA ADMINISTRADORES -->
     @if($esAdmin)
         <div class="d-flex gap-2">
-            <a href="{{ route('articulos.kardex') }}" class="btn btn-outline-secondary rounded-pill px-3 fw-semibold">
-                <i class="bi bi-journal-text me-1"></i> Movimientos
-            </a>
-            <a href="{{ route('articulos.traspaso') }}" class="btn btn-warning rounded-pill px-3 fw-semibold text-dark">
-                <i class="bi bi-arrow-left-right me-1"></i> Mover Stock
-            </a>
-            <a href="{{ route('articulos.create') }}" class="btn btn-primary rounded-pill px-4 fw-semibold shadow-sm">
-                <i class="bi bi-plus-lg me-1"></i> Nuevo Artículo
-            </a>
+            @if(auth()->user()->tienePermiso('inventory.kardex'))
+                <a href="{{ route('articulos.kardex') }}" class="btn btn-outline-secondary rounded-pill px-3 fw-semibold">
+                    <i class="bi bi-journal-text me-1"></i> Movimientos
+                </a>
+            @endif
+            @if(auth()->user()->tienePermiso('inventory.transfer'))
+                <a href="{{ route('articulos.traspaso') }}" class="btn btn-warning rounded-pill px-3 fw-semibold text-dark">
+                    <i class="bi bi-arrow-left-right me-1"></i> Mover Stock
+                </a>
+            @endif
+            @if(auth()->user()->tienePermiso('inventory.create'))
+                <a href="{{ route('articulos.create') }}" class="btn btn-primary rounded-pill px-4 fw-semibold shadow-sm">
+                    <i class="bi bi-plus-lg me-1"></i> Nuevo Artículo
+                </a>
+            @endif
         </div>
     @endif
 </div>
@@ -89,8 +95,7 @@
                     <th>Precio Contado</th>
                     <th>Precio Crédito Base</th>
                     <th class="text-center">{{ $esAdmin ? 'Stock Almacén' : 'Mi Stock' }}</th>
-                    @if($esAdmin)
-                        <th class="text-center">Stock Vendedores</th>
+                    @if(auth()->user()->tienePermiso('inventory.edit') || auth()->user()->tienePermiso('inventory.delete'))
                         <th class="text-end pe-4">Acciones</th>
                     @endif
                 </tr>
@@ -131,28 +136,22 @@
                         </td>
 
                         <!-- COLUMNAS EXCLUSIVAS DE ADMIN -->
-                        @if($esAdmin)
-                            <td class="text-center">
-                                @if($totalVendedores > 0)
-                                    <button type="button" class="btn btn-sm btn-outline-info rounded-pill px-3 py-1 fw-bold border-0 bg-info bg-opacity-10 text-info" data-bs-toggle="modal" data-bs-target="#modalStock_{{ $art->id }}">
-                                        <i class="bi bi-eye-fill me-1"></i> {{ $totalVendedores }} pza{{ $totalVendedores > 1 ? 's' : '' }}
-                                    </button>
-                                @else
-                                    <span class="text-muted small">-</span>
-                                @endif
-                            </td>
-
+                        @if(auth()->user()->tienePermiso('inventory.edit') || auth()->user()->tienePermiso('inventory.delete'))
                             <td class="text-end pe-4">
-                                <a href="{{ route('articulos.edit', $art->id) }}" class="btn btn-sm btn-outline-primary rounded-circle me-1" title="Editar">
-                                    <i class="bi bi-pencil"></i>
-                                </a>
-                                <form action="{{ route('articulos.destroy', $art->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Eliminar artículo?');">
-                                    @csrf
-                                    @method('DELETE')
-                                    <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </form>
+                                @if(auth()->user()->tienePermiso('inventory.edit'))
+                                    <a href="{{ route('articulos.edit', $art->id) }}" class="btn btn-sm btn-outline-primary rounded-circle me-1" title="Editar">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                @endif
+                                @if(auth()->user()->tienePermiso('inventory.delete'))
+                                    <form action="{{ route('articulos.destroy', $art->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Eliminar artículo?');">
+                                        @csrf
+                                        @method('DELETE')
+                                        <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                @endif
                             </td>
                         @endif
                     </tr>

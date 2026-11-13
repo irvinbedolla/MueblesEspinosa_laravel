@@ -47,13 +47,15 @@
                             <a href="{{ route('roles.edit', $role->id) }}" class="btn btn-sm btn-outline-primary rounded-circle me-1" title="Editar">
                                 <i class="bi bi-pencil"></i>
                             </a>
-                            <form action="{{ route('roles.destroy', $role->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Eliminar este rol?');">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
+                            @if(strtolower($role->name) !== 'Administrador')
+                                <form action="{{ route('roles.destroy', $role->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Eliminar este rol?');">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            @endif
                         </td>
                     </tr>
                 @empty

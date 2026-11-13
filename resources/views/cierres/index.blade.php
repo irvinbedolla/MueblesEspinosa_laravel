@@ -3,21 +3,17 @@
 @section('title', 'Módulo de Cierres de Caja - Muebles Espinosa')
 
 @section('content')
-<div class="container-fluid px-4 mt-4 mb-5">
-    
-    <!-- ENCABEZADO -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h3 class="fw-bold text-dark mb-1"><i class="bi bi-cash-stack text-primary me-2"></i>Control de Cierres de Caja</h3>
-            <p class="text-muted small mb-0">Selecciona la modalidad de cierre para generar los reportes contables del periodo.</p>
-        </div>
-    </div>
+
+@php
+        $puedeVerTodos = auth()->user()->tienePermiso('cierres.all');
+        $colClass = $puedeVerTodos ? 'col-md-4' : 'col-md-6';
+    @endphp
 
     <!-- TARJETAS CON ALTURA UNIFORME -->
     <div class="row g-4 align-items-stretch mb-4">
         
         <!-- 1. CIERRE DIARIO -->
-        <div class="col-md-4">
+        <div class="{{ $colClass }}">
             <div class="card border-0 shadow-sm rounded-4 h-100">
                 <div class="card-body p-4 text-center d-flex flex-column justify-content-between">
                     <div>
@@ -25,7 +21,9 @@
                             <i class="bi bi-calendar-check fs-2"></i>
                         </div>
                         <h5 class="fw-bold text-dark mb-2">Cierre Diario</h5>
-                        <p class="text-muted small mb-4">Genera el corte de caja del día de hoy en tiempo real.</p>
+                        <p class="text-muted small mb-4">
+                            {{ $puedeVerTodos ? 'Genera el corte de caja global del día de hoy en tiempo real.' : 'Genera tu corte de caja personal del día de hoy en tiempo real.' }}
+                        </p>
                     </div>
 
                     <div>
@@ -41,7 +39,7 @@
         </div>
 
         <!-- 2. CIERRE POR FECHAS -->
-        <div class="col-md-4">
+        <div class="{{ $colClass }}">
             <div class="card border-0 shadow-sm rounded-4 h-100">
                 <div class="card-body p-4 text-center d-flex flex-column justify-content-between">
                     <div>
@@ -49,7 +47,9 @@
                             <i class="bi bi-calendar-range fs-2"></i>
                         </div>
                         <h5 class="fw-bold text-dark mb-2">Cierre por Fechas</h5>
-                        <p class="text-muted small mb-3">Filtra por un rango específico de fechas de cobro.</p>
+                        <p class="text-muted small mb-3">
+                            {{ $puedeVerTodos ? 'Filtra por un rango específico de fechas de cobro.' : 'Filtra tus cobros en un rango específico de fechas.' }}
+                        </p>
                     </div>
 
                     <form action="{{ route('cierres.pdf') }}" method="GET" target="_blank" class="w-100 form-reporte-cierre">
@@ -71,54 +71,44 @@
             </div>
         </div>
 
-        <!-- 3. CIERRE POR USUARIO -->
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm rounded-4 h-100">
-                <div class="card-body p-4 text-center d-flex flex-column justify-content-between">
-                    <div>
-                        <div class="bg-info bg-opacity-10 text-info p-3 rounded-circle d-inline-block mb-3">
-                            <i class="bi bi-person-badge fs-2"></i>
+        <!-- 3. CIERRE POR USUARIO (SOLO CON PERMISO cierres.all) -->
+        @if($puedeVerTodos)
+            <div class="col-md-4">
+                <div class="card border-0 shadow-sm rounded-4 h-100">
+                    <div class="card-body p-4 text-center d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="bg-info bg-opacity-10 text-info p-3 rounded-circle d-inline-block mb-3">
+                                <i class="bi bi-person-badge fs-2"></i>
+                            </div>
+                            <h5 class="fw-bold text-dark mb-2">Cierre por Usuario</h5>
+                            <p class="text-muted small mb-3">Filtrar cobros realizados por un cobrador específico.</p>
                         </div>
-                        <h5 class="fw-bold text-dark mb-2">Cierre por Usuario</h5>
-                        <p class="text-muted small mb-3">Filtrar cobros realizados por un cobrador específico.</p>
-                    </div>
 
-                    <form action="{{ route('cierres.pdf') }}" method="GET" target="_blank" class="w-100 form-reporte-cierre">
-                        <div class="mb-2">
-                            <select name="cobrador_id" class="form-select" required>
-                                <option value="" selected>Seleccione Cobrador...</option>
-                                @foreach($cobradores as $cob)
-                                    <option value="{{ $cob->id }}">{{ $cob->username }}</option>
-                                @endforeach
-                            </select>
-                        </div>
-                        <div class="row g-2 mb-3">
-                            <div class="col-6">
-                                <input type="date" name="fecha1" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
+                        <form action="{{ route('cierres.pdf') }}" method="GET" target="_blank" class="w-100 form-reporte-cierre">
+                            <div class="mb-2">
+                                <select name="cobrador_id" class="form-select" required>
+                                    <option value="" selected>Seleccione Cobrador...</option>
+                                    @foreach($cobradores as $cob)
+                                        <option value="{{ $cob->id }}">{{ $cob->username }}</option>
+                                    @endforeach
+                                </select>
                             </div>
-                            <div class="col-6">
-                                <input type="date" name="fecha2" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <input type="date" name="fecha1" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
+                                </div>
+                                <div class="col-6">
+                                    <input type="date" name="fecha2" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
+                                </div>
                             </div>
-                        </div>
-                        <button type="submit" class="btn btn-info text-white rounded-3 w-100 py-2 fw-bold shadow-sm">
-                            <i class="bi bi-person-check me-1"></i> Filtrar Usuario
-                        </button>
-                    </form>
+                            <button type="submit" class="btn btn-info text-white rounded-3 w-100 py-2 fw-bold shadow-sm">
+                                <i class="bi bi-person-check me-1"></i> Filtrar Usuario
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
-        </div>
+        @endif
 
     </div>
-</div>
-
-<!-- BLOQUEO DEL SPINNER ÚNICAMENTE PARA ESTA VISTA -->
-<script>
-    document.addEventListener('submit', function(event) {
-        // Verifica si el formulario enviado pertenece a los reportes de cierres
-        if (event.target && event.target.classList.contains('form-reporte-cierre')) {
-            // Detiene la propagación para que los scripts globales del layout no activen el modal de carga
-            event.stopImmediatePropagation();
-        }
-    }, true); // El valor 'true' activa la fase de captura para ejecutarse ANTES que los scripts globales
-</script>
 @endsection

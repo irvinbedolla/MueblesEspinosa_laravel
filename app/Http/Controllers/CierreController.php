@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
-use Barryvdh\DomPDF\Facade\Pdf; // Asegúrate de tener barryvdh/laravel-dompdf o FPDF
 
 class CierreController extends Controller
 {
@@ -27,59 +26,41 @@ class CierreController extends Controller
         $user = auth()->user();
         $tipoSeccion = $user->isAdmin() ? 0 : 1;
         $idUsuario = $user->id;
-
-        // Nombre de usuario encargador
         $nombreVendedor = $user->username ?? 'Desconocido';
 
-        // Cantidad de ventas pendientes dentro del rango
         $totalPendientes = DB::table('ventas')
             ->where('status', 'Pendiente')
             ->whereBetween('fecha_final_pago', [$fecha1, $fecha2])
             ->count();
 
-        // Consulta de abonos clasificada
+        // Consulta limpia 1 a 1 sin colisiones UUID vs INT
         $query = DB::table('abonos as a')
             ->select(
                 'a.*',
+                DB::raw("COALESCE(v.venta_id_legacy, v.folio) as venta_numero"),
                 'c.nombre as cliente_nombre',
                 'v.fecha_venta',
                 'v.total as venta_total',
                 'v.saldo_restante as venta_restante',
-                DB::raw("COALESCE(u.username, a.a_cobrador, 'N/A') as nombre_cobrador"),
-                DB::raw("IF(a.a_fecha = v.fecha_venta, 'Enganche', 'Abono') as tipo_movimiento")
+                DB::raw("COALESCE(u.username, 'N/A') as nombre_cobrador"),
+                DB::raw("IF(DATE(a.a_fecha) = v.fecha_venta, 'Enganche', 'Abono') as tipo_movimiento")
             )
-            ->leftJoin('ventas as v', function($join) {
-                $join->on('a.venta_id', '=', 'v.id')
-                     ->orOn('a.a_venta', '=', 'v.venta_id_legacy');
-            })
-            ->leftJoin('clientes as c', function($join) {
-                $join->on('v.cliente_id', '=', 'c.id')
-                     ->orOn('v.cliente_id', '=', 'c.cliente_id');
-            })
-            ->leftJoin('users as u', function($join) {
-                $join->on('a.a_cobrador', '=', 'u.id')
-                     ->orOn('a.a_cobrador', '=', 'u.user_id_legacy')
-                     ->orOn('a.a_cobrador', '=', 'u.username');
-            })
-            ->whereBetween('a.a_fecha', [$fecha1, $fecha2]);
+            ->leftJoin('ventas as v', 'a.venta_id', '=', 'v.id')
+            ->leftJoin('clientes as c', 'v.cliente_id', '=', 'c.id')
+            ->leftJoin('users as u', 'a.a_cobrador', '=', 'u.id')
+            ->whereDate('a.a_fecha', '>=', $fecha1)
+            ->whereDate('a.a_fecha', '<=', $fecha2);
 
-        // Filtrar por cobrador si se especificó
         if (!empty($cobradorId)) {
-            $query->where(function($q) use ($cobradorId) {
-                $q->where('a.a_cobrador', $cobradorId)
-                  ->orWhere('u.id', $cobradorId);
-            });
+            $query->where('a.a_cobrador', $cobradorId);
         } elseif ($tipoSeccion != 0) {
-            // Si es usuario regular, solo sus cobros
-            $query->where(function($q) use ($idUsuario, $user) {
-                $q->where('a.a_cobrador', $idUsuario)
-                  ->orWhere('a.a_cobrador', $user->username);
-            });
+            $query->where('a.a_cobrador', $idUsuario);
         }
 
-        $abonos = $query->orderBy('a.created_at', 'asc')->get();
+        $abonos = $query->orderBy('a.a_fecha', 'asc')
+                        ->orderBy('a.created_at', 'asc')
+                        ->get();
 
-        // Totales y acumuladores
         $totalEfectivo = 0;
         $totalTarjeta = 0;
         $totalEnganches = 0;
@@ -129,7 +110,6 @@ class CierreController extends Controller
             'totalGeneral'    => $totalGeneral
         ];
 
-        // Retornar vista HTML formateada para impresión o PDF
         return view('cierres.pdf_template', $datos);
     }
 }

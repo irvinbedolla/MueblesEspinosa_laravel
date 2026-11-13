@@ -81,15 +81,14 @@ Route::middleware(['auth'])->group(function () {
     // API/Endpoint de Sincronización masiva desde Offline (IndexedDB)
     Route::post('/api/cobrador/sincronizar-abonos', [RutaCobroController::class, 'sincronizarAbonosOffline'])->name('cobrador.sincronizar');
 
-    //Rutas de  ruta
+    // Rutas de Cobranza Dinámica (Agenda)
     Route::get('/rutas', [RutaCobroController::class, 'index'])->name('rutas.index');
-    Route::post('/rutas/asignar', [RutaCobroController::class, 'asignarRuta'])->name('rutas.asignar');
-    Route::put('/rutas/{id}', [RutaCobroController::class, 'update'])->name('rutas.update');
-    Route::delete('/rutas/{id}', [RutaCobroController::class, 'destroy'])->name('rutas.destroy');
-    
-    Route::get('/cobrador/mi-ruta', [RutaCobroController::class, 'miRutaCobrador'])->name('cobrador.mi_ruta');
-    Route::post('/cobrador/sincronizar', [RutaCobroController::class, 'sincronizar'])->name('cobrador.sincronizar');
+    Route::post('/rutas/{venta}/reagendar', [RutaCobroController::class, 'reagendar'])->name('rutas.reagendar');
+    Route::post('/rutas/{venta}/asignar-cobrador', [RutaCobroController::class, 'asignarCobrador'])->name('rutas.asignar_cobrador');
 
+    // Vista móvil del Cobrador (Optimizada para Offline)
+    Route::get('/cobrador/mi-ruta', [RutaCobroController::class, 'miRutaCobrador'])->name('cobrador.mi_ruta');
+    Route::post('/api/cobrador/sincronizar-abonos', [RutaCobroController::class, 'sincronizarAbonosOffline'])->name('cobrador.sincronizar');
     // Lista general de ventas con abonos pendientes (abono_cliente1.php)
     Route::get('/abonos', [AbonoController::class, 'index'])->name('abonos.index');
     
@@ -140,6 +139,5 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/ventas/{venta}/cambiar-articulo', [VentaController::class, 'cambiarArticuloVenta'])->name('ventas.cambiar_articulo');
     Route::post('/ventas/{id}/cambiar-estatus', [VentaController::class, 'cambiarEstatusStatus'])->name('ventas.cambiar_estatus');
 
-
-
+   
 });

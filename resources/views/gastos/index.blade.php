@@ -5,163 +5,206 @@
 @section('content')
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
 
+@php
+    $puedeCrearGasto    = auth()->user()->tienePermiso('gastos.create');
+    $puedeVerGasto      = auth()->user()->tienePermiso('gastos.view');
+    $puedeEditarGasto   = auth()->user()->tienePermiso('gastos.edit');
+    $puedeEliminarGasto = auth()->user()->tienePermiso('gastos.delete');
+    $esAdminGastos      = auth()->user()->isAdmin() || $puedeCrearGasto || $puedeEditarGasto;
+@endphp
+
 <div class="container-fluid px-4 mt-4 mb-5">
     
-    <!-- NAVEGACIÓN SUPERIOR EN 4 SECCIONES -->
+    <!-- NAVEGACIÓN SUPERIOR SEGÚN PERMISOS -->
     <div class="d-flex justify-content-center flex-wrap gap-2 mb-4">
-        <button type="button" class="btn btn-dark fw-bold px-4 py-2 shadow-sm nav-gasto-btn" onclick="mostrarSeccion('agregar', this)">AGREGAR</button>
-        <button type="button" class="btn btn-primary fw-bold px-4 py-2 shadow-sm nav-gasto-btn" onclick="mostrarSeccion('consultar', this)">CONSULTAR</button>
-        <button type="button" class="btn btn-primary fw-bold px-4 py-2 shadow-sm nav-gasto-btn" onclick="mostrarSeccion('prestamos', this)">PRÉSTAMOS</button>
-        <button type="button" class="btn btn-primary fw-bold px-4 py-2 shadow-sm nav-gasto-btn" onclick="mostrarSeccion('mis_prestamos', this)">MIS PRÉSTAMOS</button>
+        @if($puedeCrearGasto)
+            <button type="button" class="btn btn-dark fw-bold px-4 py-2 shadow-sm nav-gasto-btn" data-seccion="agregar" onclick="mostrarSeccion('agregar', this)">AGREGAR</button>
+        @endif
+        @if($puedeVerGasto)
+            <button type="button" class="btn btn-primary fw-bold px-4 py-2 shadow-sm nav-gasto-btn" data-seccion="consultar" onclick="mostrarSeccion('consultar', this)">CONSULTAR</button>
+        @endif
+        @if($esAdminGastos)
+            <button type="button" class="btn btn-primary fw-bold px-4 py-2 shadow-sm nav-gasto-btn" data-seccion="prestamos" onclick="mostrarSeccion('prestamos', this)">PRÉSTAMOS</button>
+        @endif
+        <button type="button" class="btn btn-primary fw-bold px-4 py-2 shadow-sm nav-gasto-btn" data-seccion="mis_prestamos" onclick="mostrarSeccion('mis_prestamos', this)">MIS PRÉSTAMOS</button>
     </div>
 
     <!-- ==========================================
         SECCIÓN 1: AGREGAR GASTO OPERATIVO
     ========================================== -->
-    <div id="seccionAgregar" class="card border-0 shadow-sm rounded-4 p-4">
-        <h5 class="fw-bold text-dark mb-4"><i class="bi bi-plus-circle text-primary me-2"></i>Registrar Nuevo Gasto Operativo</h5>
-        
-        <form id="formAgregarGasto" onsubmit="return false;">
-            <div class="row g-3 mb-4">
-                <div class="col-md-6">
-                    <label class="form-label small text-muted text-uppercase fw-bold">Descripción / Motivo</label>
-                    <input type="text" id="gastoDescripcion" class="form-control form-control-lg" placeholder="Ej. Combustible, Mantenimiento..." required>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label small text-muted text-uppercase fw-bold">Fecha</label>
-                    <input type="date" id="gastoFecha" class="form-control form-control-lg" value="{{ date('Y-m-d') }}" required>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label small text-muted text-uppercase fw-bold">Costo ($)</label>
-                    <input type="number" step="any" id="gastoCosto" class="form-control form-control-lg" placeholder="0.00" required>
-                </div>
-            </div>
+    @if($puedeCrearGasto)
+        <div id="seccionAgregar" class="card border-0 shadow-sm rounded-4 p-4" style="display: none;">
+            <h5 class="fw-bold text-dark mb-4"><i class="bi bi-plus-circle text-primary me-2"></i>Registrar Nuevo Gasto Operativo</h5>
             
-            <button type="button" class="btn btn-primary btn-lg rounded-3 px-5 fw-bold shadow-sm" onclick="guardarGastoDirecto()">
-                <i class="bi bi-send-fill me-2"></i> GUARDAR GASTO
-            </button>
-        </form>
-    </div>
+            <form id="formAgregarGasto" onsubmit="return false;">
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted text-uppercase fw-bold">Descripción / Motivo</label>
+                        <input type="text" id="gastoDescripcion" class="form-control form-control-lg" placeholder="Ej. Combustible, Mantenimiento..." required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted text-uppercase fw-bold">Fecha</label>
+                        <input type="date" id="gastoFecha" class="form-control form-control-lg" value="{{ date('Y-m-d') }}" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted text-uppercase fw-bold">Costo ($)</label>
+                        <input type="number" step="any" id="gastoCosto" class="form-control form-control-lg" placeholder="0.00" required>
+                    </div>
+                </div>
+                
+                <button type="button" class="btn btn-primary btn-lg rounded-3 px-5 fw-bold shadow-sm" onclick="guardarGastoDirecto()">
+                    <i class="bi bi-send-fill me-2"></i> GUARDAR GASTO
+                </button>
+            </form>
+        </div>
+    @endif
 
     <!-- ==========================================
          SECCIÓN 2: CONSULTAR GASTOS POR FECHA
     ========================================== -->
-    <div id="seccionConsultar" class="card border-0 shadow-sm rounded-4 p-4" style="display: none;">
-        <h5 class="fw-bold text-dark mb-4"><i class="bi bi-search text-primary me-2"></i>Consulta de Gastos Operativos</h5>
-        <div class="row g-3 align-items-end mb-4">
-            <div class="col-md-4">
-                <label class="form-label small text-muted text-uppercase fw-bold">Fecha Inicial</label>
-                <!-- Ajustado a fecha amplia por defecto para traer registros migrados -->
-                <input type="date" id="fecha1Gasto" class="form-control" value="2020-01-01">
+    @if($puedeVerGasto)
+        <div id="seccionConsultar" class="card border-0 shadow-sm rounded-4 p-4" style="display: none;">
+            <h5 class="fw-bold text-dark mb-4"><i class="bi bi-search text-primary me-2"></i>Consulta de Gastos Operativos</h5>
+            <div class="row g-3 align-items-end mb-4">
+                <div class="col-md-4">
+                    <label class="form-label small text-muted text-uppercase fw-bold">Fecha Inicial</label>
+                    <input type="date" id="fecha1Gasto" class="form-control" value="2020-01-01">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small text-muted text-uppercase fw-bold">Fecha Final</label>
+                    <input type="date" id="fecha2Gasto" class="form-control" value="{{ date('Y-m-d') }}">
+                </div>
+                <div class="col-md-4">
+                    <button type="button" class="btn btn-primary w-100 fw-bold py-2 shadow-sm" onclick="consultarGastos()">
+                        <i class="bi bi-search me-1"></i> BUSCAR GASTOS
+                    </button>
+                </div>
             </div>
-            <div class="col-md-4">
-                <label class="form-label small text-muted text-uppercase fw-bold">Fecha Final</label>
-                <input type="date" id="fecha2Gasto" class="form-control" value="{{ date('Y-m-d') }}">
-            </div>
-            <div class="col-md-4">
-                <button type="button" class="btn btn-primary w-100 fw-bold py-2 shadow-sm" onclick="consultarGastos()">
-                    <i class="bi bi-search me-1"></i> BUSCAR GASTOS
-                </button>
-            </div>
-        </div>
 
-        <div class="table-responsive">
-            <table class="table table-hover align-middle w-100" id="tablaConsultarGastos">
-                <thead>
-                    <tr class="text-uppercase small text-muted border-bottom">
-                        <th>N° Gasto</th>
-                        <th>Fecha</th>
-                        <th>Descripción</th>
-                        <th>Costo</th>
-                        <th class="text-center">Eliminar</th>
-                    </tr>
-                </thead>
-                <tbody id="tbodyConsultarGastos"></tbody>
-            </table>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle w-100" id="tablaConsultarGastos">
+                    <thead>
+                        <tr class="text-uppercase small text-muted border-bottom">
+                            <th>N° Gasto</th>
+                            <th>Fecha</th>
+                            <th>Descripción</th>
+                            <th>Costo</th>
+                            @if($puedeEliminarGasto)
+                                <th class="text-center">Eliminar</th>
+                            @endif
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyConsultarGastos"></tbody>
+                </table>
+            </div>
+            <div class="text-center mt-3">
+                <h3 class="fw-bold text-dark">Total: $<span id="lblTotalGastos">0.00</span></h3>
+            </div>
         </div>
-        <div class="text-center mt-3">
-            <h3 class="fw-bold text-dark">Total: $<span id="lblTotalGastos">0.00</span></h3>
-        </div>
-    </div>
+    @endif
 
     <!-- ==========================================
          SECCIÓN 3: PRÉSTAMOS DE USUARIOS
     ========================================== -->
-    <div id="seccionPrestamos" style="display: none;">
-        <!-- SUB-NAVEGACIÓN DE PRÉSTAMOS -->
-        <div class="d-flex justify-content-center gap-2 mb-4">
-            <button type="button" class="btn btn-dark btn-sm fw-bold px-3 sub-prestamo-btn" onclick="cargarPrestamosSub('activos', this)">ACTIVOS</button>
-            <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-3 sub-prestamo-btn" onclick="cargarPrestamosSub('generar', this)">GENERAR</button>
-            <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-3 sub-prestamo-btn" onclick="cargarPrestamosSub('historial', this)">HISTORIAL PAGADOS</button>
-        </div>
+    @if($esAdminGastos)
+        <div id="seccionPrestamos" style="display: none;">
+            <!-- SUB-NAVEGACIÓN DE PRÉSTAMOS -->
+            <div class="d-flex justify-content-center gap-2 mb-4">
+                <button type="button" class="btn btn-dark btn-sm fw-bold px-3 sub-prestamo-btn" onclick="cargarPrestamosSub('activos', this)">ACTIVOS</button>
+                @if($puedeCrearGasto)
+                    <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-3 sub-prestamo-btn" onclick="cargarPrestamosSub('generar', this)">GENERAR</button>
+                @endif
+                <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-3 sub-prestamo-btn" onclick="cargarPrestamosSub('historial', this)">HISTORIAL PAGADOS</button>
+            </div>
 
-        <!-- VISTA SUB 1: PRÉSTAMOS ACTIVOS -->
-        <div id="subPrestamosActivos" class="card border-0 shadow-sm rounded-4 p-4">
-            <h5 class="fw-bold text-dark mb-3"><i class="bi bi-clock-history text-warning me-2"></i>Préstamos Activos Pendientes</h5>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle w-100" id="tablaPrestamosActivos">
-                    <thead>
-                        <tr class="text-uppercase small text-muted border-bottom">
-                            <th>N° Gasto</th><th>Fecha</th><th>Usuario</th><th>Descripción</th><th>Costo</th><th>Restante</th><th>Historial</th><th>Abonar</th><th class="text-center">Eliminar</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbodyPrestamosActivos"></tbody>
-                </table>
+            <!-- VISTA SUB 1: PRÉSTAMOS ACTIVOS -->
+            <div id="subPrestamosActivos" class="card border-0 shadow-sm rounded-4 p-4">
+                <h5 class="fw-bold text-dark mb-3"><i class="bi bi-clock-history text-warning me-2"></i>Préstamos Activos Pendientes</h5>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle w-100" id="tablaPrestamosActivos">
+                        <thead>
+                            <tr class="text-uppercase small text-muted border-bottom">
+                                <th>N° Gasto</th>
+                                <th>Fecha</th>
+                                <th>Usuario</th>
+                                <th>Descripción</th>
+                                <th>Costo</th>
+                                <th>Restante</th>
+                                <th>Historial</th>
+                                @if($puedeEditarGasto)
+                                    <th>Abonar</th>
+                                @endif
+                                @if($puedeEliminarGasto)
+                                    <th class="text-center">Eliminar</th>
+                                @endif
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyPrestamosActivos"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- VISTA SUB 2: GENERAR NUEVO PRÉSTAMO -->
+            @if($puedeCrearGasto)
+                <div id="subPrestamosGenerar" class="card border-0 shadow-sm rounded-4 p-4" style="display: none;">
+                    <h5 class="fw-bold text-primary mb-3"><i class="bi bi-cash-coin me-2"></i>Registrar Nuevo Préstamo</h5>
+                    
+                    <form id="formRegistrarPrestamo" onsubmit="return false;">
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted text-uppercase fw-bold">Descripción / Motivo</label>
+                                <input type="text" id="presDescripcion" class="form-control" placeholder="Ej. Préstamo personal, viáticos..." required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted text-uppercase fw-bold">Fecha del Préstamo</label>
+                                <input type="date" id="presFecha" class="form-control" value="{{ date('Y-m-d') }}" required>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted text-uppercase fw-bold">Monto del Préstamo ($)</label>
+                                <input type="number" step="any" id="presMonto" class="form-control" placeholder="0.00" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted text-uppercase fw-bold">Usuario Destino</label>
+                                <select id="presUserId" class="form-select" required>
+                                    <option value="" selected>Selecciona un cobrador/usuario...</option>
+                                    @foreach($cobradores as $cob)
+                                        <option value="{{ $cob->id }}">{{ $cob->username }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <button type="button" class="btn btn-primary rounded-3 px-4 fw-bold shadow-sm" onclick="guardarPrestamoDirecto()">
+                            <i class="bi bi-send-fill me-2"></i> Guardar Préstamo
+                        </button>
+                    </form>
+                </div>
+            @endif
+
+            <!-- VISTA SUB 3: HISTORIAL PRÉSTAMOS PAGADOS -->
+            <div id="subPrestamosHistorial" class="card border-0 shadow-sm rounded-4 p-4" style="display: none;">
+                <h5 class="fw-bold text-success mb-3"><i class="bi bi-check-circle-fill me-2"></i>Historial de Préstamos Totalmente Pagados</h5>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle w-100" id="tablaPrestamosPagados">
+                        <thead>
+                            <tr class="text-uppercase small text-muted border-bottom">
+                                <th>N° Gasto</th>
+                                <th>Fecha</th>
+                                <th>Usuario</th>
+                                <th>Descripción</th>
+                                <th>Costo</th>
+                                <th>Pagos</th>
+                                <th>Estatus</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyPrestamosPagados"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
-
-        <!-- VISTA SUB 2: GENERAR NUEVO PRÉSTAMO -->
-        <div id="subPrestamosGenerar" class="card border-0 shadow-sm rounded-4 p-4" style="display: none;">
-            <h5 class="fw-bold text-primary mb-3"><i class="bi bi-cash-coin me-2"></i>Registrar Nuevo Préstamo</h5>
-            
-            <form id="formRegistrarPrestamo" onsubmit="return false;">
-                <div class="row g-3 mb-3">
-                    <div class="col-md-6">
-                        <label class="form-label small text-muted text-uppercase fw-bold">Descripción / Motivo</label>
-                        <input type="text" id="presDescripcion" class="form-control" placeholder="Ej. Préstamo personal, viáticos..." required>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label small text-muted text-uppercase fw-bold">Fecha del Préstamo</label>
-                        <input type="date" id="presFecha" class="form-control" value="{{ date('Y-m-d') }}" required>
-                    </div>
-                </div>
-                <div class="row g-3 mb-4">
-                    <div class="col-md-6">
-                        <label class="form-label small text-muted text-uppercase fw-bold">Monto del Préstamo ($)</label>
-                        <input type="number" step="any" id="presMonto" class="form-control" placeholder="0.00" required>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label small text-muted text-uppercase fw-bold">Usuario Destino</label>
-                        <select id="presUserId" class="form-select" required>
-                            <option value="" selected>Selecciona un cobrador/usuario...</option>
-                            @foreach($cobradores as $cob)
-                                <option value="{{ $cob->id }}">{{ $cob->username }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                </div>
-                
-                <button type="button" class="btn btn-primary rounded-3 px-4 fw-bold shadow-sm" onclick="guardarPrestamoDirecto()">
-                    <i class="bi bi-send-fill me-2"></i> Guardar Préstamo
-                </button>
-            </form>
-        </div>
-
-        <!-- VISTA SUB 3: HISTORIAL PRÉSTAMOS PAGADOS -->
-        <div id="subPrestamosHistorial" class="card border-0 shadow-sm rounded-4 p-4" style="display: none;">
-            <h5 class="fw-bold text-success mb-3"><i class="bi bi-check-circle-fill me-2"></i>Historial de Préstamos Totalmente Pagados</h5>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle w-100" id="tablaPrestamosPagados">
-                    <thead>
-                        <tr class="text-uppercase small text-muted border-bottom">
-                            <th>N° Gasto</th><th>Fecha</th><th>Usuario</th><th>Descripción</th><th>Costo</th><th>Pagos</th><th>Estatus</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbodyPrestamosPagados"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    @endif
 
     <!-- ==========================================
          SECCIÓN 4: MIS PRÉSTAMOS
@@ -172,7 +215,12 @@
             <table class="table table-hover align-middle w-100" id="tablaMisPrestamos">
                 <thead>
                     <tr class="text-uppercase small text-muted border-bottom">
-                        <th>N° Gasto</th><th>Fecha</th><th>Descripción</th><th>Costo</th><th>Restante</th><th>Historial</th>
+                        <th>N° Gasto</th>
+                        <th>Fecha</th>
+                        <th>Descripción</th>
+                        <th>Costo</th>
+                        <th>Restante</th>
+                        <th>Historial</th>
                     </tr>
                 </thead>
                 <tbody id="tbodyMisPrestamos"></tbody>
@@ -183,37 +231,39 @@
 </div>
 
 <!-- MODAL: REGISTRAR ABONO A PRÉSTAMO -->
-<div class="modal fade" id="modalAbonarPrestamo" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content rounded-4 border-0 shadow">
-            <div class="modal-header border-0 pb-0">
-                <h5 class="modal-title fw-bold text-dark"><i class="bi bi-wallet2 text-success me-2"></i>Registrar Abono a Préstamo</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+@if($puedeEditarGasto)
+    <div class="modal fade" id="modalAbonarPrestamo" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0 shadow">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-wallet2 text-success me-2"></i>Registrar Abono a Préstamo</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="formAbonarPrestamo" onsubmit="return false;">
+                    <div class="modal-body p-4">
+                        <input type="hidden" id="modalPrestamoId">
+                        <div class="mb-3">
+                            <label class="form-label small text-muted text-uppercase fw-bold">Saldo Restante Actual</label>
+                            <input type="text" id="modalPrestamoRestante" class="form-control fw-bold text-danger" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted text-uppercase fw-bold">Monto del Abono ($)</label>
+                            <input type="number" step="any" id="modalMontoAbono" class="form-control form-control-lg" placeholder="0.00" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted text-uppercase fw-bold">Fecha del Abono</label>
+                            <input type="date" id="modalFechaAbono" class="form-control" value="{{ date('Y-m-d') }}" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0 pt-0">
+                        <button type="button" class="btn btn-light border rounded-3" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-success rounded-3 px-4 fw-bold" onclick="guardarAbonoPrestamoDirecto()">Guardar Abono</button>
+                    </div>
+                </form>
             </div>
-            <form id="formAbonarPrestamo" onsubmit="return false;">
-                <div class="modal-body p-4">
-                    <input type="hidden" id="modalPrestamoId">
-                    <div class="mb-3">
-                        <label class="form-label small text-muted text-uppercase fw-bold">Saldo Restante Actual</label>
-                        <input type="text" id="modalPrestamoRestante" class="form-control fw-bold text-danger" readonly>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label small text-muted text-uppercase fw-bold">Monto del Abono ($)</label>
-                        <input type="number" step="any" id="modalMontoAbono" class="form-control form-control-lg" placeholder="0.00" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label small text-muted text-uppercase fw-bold">Fecha del Abono</label>
-                        <input type="date" id="modalFechaAbono" class="form-control" value="{{ date('Y-m-d') }}" required>
-                    </div>
-                </div>
-                <div class="modal-footer border-0 pt-0">
-                    <button type="button" class="btn btn-light border rounded-3" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-success rounded-3 px-4 fw-bold" onclick="guardarAbonoPrestamoDirecto()">Guardar Abono</button>
-                </div>
-            </form>
         </div>
     </div>
-</div>
+@endif
 
 <!-- MODAL: HISTORIAL DE ABONOS DE PRÉSTAMO -->
 <div class="modal fade" id="modalHistorialAbonos" tabindex="-1" aria-hidden="true">
@@ -247,6 +297,13 @@
 <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
 
 <script>
+    const permGastos = {
+        crear:    @json($puedeCrearGasto),
+        ver:      @json($puedeVerGasto),
+        editar:   @json($puedeEditarGasto),
+        eliminar: @json($puedeEliminarGasto)
+    };
+
     // Cancelar envíos de formulario nativos
     document.addEventListener('submit', function(e) {
         e.preventDefault();
@@ -254,19 +311,34 @@
         return false;
     }, true);
 
+    // Abrir automáticamente la primera sección permitida al cargar la vista
+    document.addEventListener('DOMContentLoaded', function() {
+        const primerBtn = document.querySelector('.nav-gasto-btn');
+        if (primerBtn) {
+            mostrarSeccion(primerBtn.getAttribute('data-seccion'), primerBtn);
+        }
+    });
+
     // NAVEGACIÓN PRINCIPAL
     function mostrarSeccion(seccion, btn) {
         document.querySelectorAll('.nav-gasto-btn').forEach(b => {
             b.classList.remove('btn-dark');
             b.classList.add('btn-primary');
         });
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-dark');
+        if (btn) {
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-dark');
+        }
 
-        document.getElementById('seccionAgregar').style.display = (seccion === 'agregar') ? 'block' : 'none';
-        document.getElementById('seccionConsultar').style.display = (seccion === 'consultar') ? 'block' : 'none';
-        document.getElementById('seccionPrestamos').style.display = (seccion === 'prestamos') ? 'block' : 'none';
-        document.getElementById('seccionMisPrestamos').style.display = (seccion === 'mis_prestamos') ? 'block' : 'none';
+        const secAgregar      = document.getElementById('seccionAgregar');
+        const secConsultar    = document.getElementById('seccionConsultar');
+        const secPrestamos    = document.getElementById('seccionPrestamos');
+        const secMisPrestamos = document.getElementById('seccionMisPrestamos');
+
+        if (secAgregar)      secAgregar.style.display      = (seccion === 'agregar') ? 'block' : 'none';
+        if (secConsultar)    secConsultar.style.display    = (seccion === 'consultar') ? 'block' : 'none';
+        if (secPrestamos)    secPrestamos.style.display    = (seccion === 'prestamos') ? 'block' : 'none';
+        if (secMisPrestamos) secMisPrestamos.style.display = (seccion === 'mis_prestamos') ? 'block' : 'none';
 
         if (seccion === 'consultar') consultarGastos();
         if (seccion === 'prestamos') cargarPrestamosSub('activos', document.querySelector('.sub-prestamo-btn'));
@@ -336,8 +408,9 @@
             $('#tablaConsultarGastos').DataTable().clear().destroy();
         }
 
+        const totalCols = permGastos.eliminar ? 5 : 4;
         const tbody = document.getElementById('tbodyConsultarGastos');
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Cargando...</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${totalCols}" class="text-center text-muted py-3">Cargando...</td></tr>`;
 
         fetch(`{{ route('gastos.consultar.ajax') }}?fecha1=${f1}&fecha2=${f2}`)
             .then(res => res.json())
@@ -350,6 +423,13 @@
                     data.forEach(item => {
                         const folio = item.folio_mostrar || item.gasto_id_legacy || item.id;
                         const costo = parseFloat(item.costo_real || item.costo || item.monto || 0).toFixed(2);
+                        const tdEliminar = permGastos.eliminar
+                            ? `<td class="text-center">
+                                   <button type="button" class="btn btn-outline-danger btn-sm border-0" onclick="eliminarRegistro('${item.id}', 'gasto')">
+                                       <i class="bi bi-trash-fill fs-5"></i>
+                                   </button>
+                               </td>`
+                            : '';
 
                         tbody.innerHTML += `
                             <tr>
@@ -357,11 +437,7 @@
                                 <td>${item.fecha || ''}</td>
                                 <td>${item.descripcion || ''}</td>
                                 <td class="fw-bold text-danger">$${costo}</td>
-                                <td class="text-center">
-                                    <button type="button" class="btn btn-outline-danger btn-sm border-0" onclick="eliminarRegistro('${item.id}', 'gasto')">
-                                        <i class="bi bi-trash-fill fs-5"></i>
-                                    </button>
-                                </td>
+                                ${tdEliminar}
                             </tr>`;
                     });
                 }
@@ -375,7 +451,7 @@
             })
             .catch(err => {
                 console.error('Error al consultar gastos:', err);
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-3">Error al consultar gastos.</td></tr>';
+                tbody.innerHTML = `<tr><td colspan="${totalCols}" class="text-center text-danger py-3">Error al consultar gastos.</td></tr>`;
             });
     }
 
@@ -390,9 +466,13 @@
             btn.classList.add('btn-dark'); 
         }
 
-        document.getElementById('subPrestamosActivos').style.display = (sub === 'activos') ? 'block' : 'none';
-        document.getElementById('subPrestamosGenerar').style.display = (sub === 'generar') ? 'block' : 'none';
-        document.getElementById('subPrestamosHistorial').style.display = (sub === 'historial') ? 'block' : 'none';
+        const subActivos   = document.getElementById('subPrestamosActivos');
+        const subGenerar   = document.getElementById('subPrestamosGenerar');
+        const subHistorial = document.getElementById('subPrestamosHistorial');
+
+        if (subActivos)   subActivos.style.display   = (sub === 'activos') ? 'block' : 'none';
+        if (subGenerar)   subGenerar.style.display   = (sub === 'generar') ? 'block' : 'none';
+        if (subHistorial) subHistorial.style.display = (sub === 'historial') ? 'block' : 'none';
 
         if (sub === 'activos' || sub === 'historial') {
             const seccionFiltro = (sub === 'activos') ? 'activos' : 'pagados';
@@ -403,8 +483,12 @@
                 $(tableId).DataTable().clear().destroy();
             }
 
+            const totalCols = (sub === 'activos')
+                ? (7 + (permGastos.editar ? 1 : 0) + (permGastos.eliminar ? 1 : 0))
+                : 7;
+
             const tbody = document.getElementById(tbodyId);
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">Cargando préstamos...</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="${totalCols}" class="text-center text-muted py-3">Cargando préstamos...</td></tr>`;
 
             fetch(`{{ route('gastos.prestamos.ajax') }}?seccion=${seccionFiltro}`)
                 .then(res => res.json())
@@ -419,6 +503,22 @@
                             const restante = parseFloat(item.saldo_restante || 0).toFixed(2);
 
                             if (sub === 'activos') {
+                                const tdAbonar = permGastos.editar
+                                    ? `<td>
+                                           <button type="button" class="btn btn-primary btn-sm text-white rounded-circle" onclick="abrirModalAbonar('${item.id}', '${restante}')">
+                                               <i class="bi bi-wallet2 fs-6"></i>
+                                           </button>
+                                       </td>`
+                                    : '';
+
+                                const tdEliminar = permGastos.eliminar
+                                    ? `<td class="text-center">
+                                           <button type="button" class="btn btn-outline-danger btn-sm border-0" onclick="eliminarRegistro('${item.id}', 'prestamo')">
+                                               <i class="bi bi-trash-fill fs-5"></i>
+                                           </button>
+                                       </td>`
+                                    : '';
+
                                 tbody.innerHTML += `
                                     <tr>
                                         <td class="fw-bold">#${folio}</td>
@@ -432,16 +532,8 @@
                                                 <i class="bi bi-box-arrow-down fs-6"></i>
                                             </button>
                                         </td>
-                                        <td>
-                                            <button type="button" class="btn btn-primary btn-sm text-white rounded-circle" onclick="abrirModalAbonar('${item.id}', '${restante}')">
-                                                <i class="bi bi-wallet2 fs-6"></i>
-                                            </button>
-                                        </td>
-                                        <td class="text-center">
-                                            <button type="button" class="btn btn-outline-danger btn-sm border-0" onclick="eliminarRegistro('${item.id}', 'prestamo')">
-                                                <i class="bi bi-trash-fill fs-5"></i>
-                                            </button>
-                                        </td>
+                                        ${tdAbonar}
+                                        ${tdEliminar}
                                     </tr>`;
                             } else {
                                 tbody.innerHTML += `
@@ -471,7 +563,7 @@
                 })
                 .catch(err => {
                     console.error('Error al cargar préstamos:', err);
-                    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-3">Error al obtener préstamos.</td></tr>';
+                    tbody.innerHTML = `<tr><td colspan="${totalCols}" class="text-center text-danger py-3">Error al obtener préstamos.</td></tr>`;
                 });
         }
     }
@@ -629,18 +721,15 @@
         .then(res => {
             alert('¡Éxito! ' + (res.message || 'Abono registrado correctamente.'));
             
-            // Cerrar el modal correctamente
             const modalElem = document.getElementById('modalAbonarPrestamo');
             const modal = bootstrap.Modal.getInstance(modalElem);
             if (modal) modal.hide();
 
-            // Limpieza manual de overlays Bootstrap para que la pantalla no se congele
             document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
             document.body.classList.remove('modal-open');
             document.body.style = '';
 
-            // Recargar sub-pestaña de préstamos activos
-            cargarPrestamosSub('activos');
+            cargarPrestamosSub('activos', document.querySelectorAll('.sub-prestamo-btn')[0]);
         })
         .catch(err => {
             console.error('Error al registrar abono:', err);
@@ -704,7 +793,7 @@
             .then(res => {
                 alert(res.message || 'Registro eliminado correctamente.');
                 if (tipo === 'gasto') consultarGastos();
-                else cargarPrestamosSub('activos');
+                else cargarPrestamosSub('activos', document.querySelectorAll('.sub-prestamo-btn')[0]);
             })
             .catch(err => {
                 console.error('Error al eliminar:', err);

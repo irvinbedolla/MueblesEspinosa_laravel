@@ -48,7 +48,6 @@
                 <th>ID Vta</th>
                 <th>Fecha</th>
                 <th>Cliente</th>
-                <th>Cobrador</th>
                 <th>N° Pago</th>
                 <th>Met. Pago</th>
                 <th>Abono</th>
@@ -59,10 +58,9 @@
         <tbody>
             @forelse($abonos as $ab)
                 <tr>
-                    <td class="text-center">{{ $ab->a_venta }}</td>
+                    <td class="text-center">{{ $ab->venta_numero ?? 'S/F' }}</td>
                     <td class="text-center">{{ \Carbon\Carbon::parse($ab->a_fecha)->format('d/m/Y') }}</td>
                     <td>{{ Str::limit($ab->cliente_nombre ?? 'N/A', 28) }}</td>
-                    <td>{{ Str::limit($ab->nombre_cobrador ?? 'N/A', 12) }}</td>
                     <td class="text-center">#{{ $ab->a_npago }}</td>
                     <td class="text-center">{{ $ab->metodo_imprimir }}</td>
                     <td class="text-end">${{ number_format($ab->a_pago, 2) }}</td>

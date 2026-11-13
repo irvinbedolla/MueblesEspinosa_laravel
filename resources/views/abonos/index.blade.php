@@ -124,9 +124,13 @@
                                     <span class="badge bg-light text-dark border">{{ $row->dia_semana ?? '-' }}</span>
                                 </td>
                                 <td class="text-center pe-4">
-                                    <a href="{{ route('abonos.show', ['id' => $row->id, 'tipo' => $tipoAbono]) }}" class="btn btn-sm btn-success px-3 fw-bold rounded-3 shadow-sm">
-                                        <i class="bi bi-cash me-1"></i> Cobrar
-                                    </a>
+                                    @if(auth()->user()->tienePermiso('cobranza.register'))
+                                        <a href="{{ route('abonos.show', ['id' => $row->id, 'tipo' => $tipoAbono]) }}" class="btn btn-sm btn-success px-3 fw-bold rounded-3 shadow-sm">
+                                            <i class="bi bi-cash me-1"></i> Cobrar
+                                        </a>
+                                    @else
+                                        <span class="badge bg-light text-muted border">Solo lectura</span>
+                                    @endif
                                 </td>
                             </tr>
                         @endforeach

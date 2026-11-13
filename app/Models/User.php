@@ -74,4 +74,15 @@ class User extends Authenticatable
     {
         return $this->hasRole('cobrador');
     }
+
+    public function tienePermiso(string $permiso): bool
+    {
+        if ($this->isAdmin()) {
+            return true;
+        }
+
+        return $this->roles()
+            ->whereHas('permissions', fn($q) => $q->where('name', $permiso))
+            ->exists();
+    }
 }

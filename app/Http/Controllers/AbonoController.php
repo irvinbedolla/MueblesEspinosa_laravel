@@ -209,7 +209,7 @@ class AbonoController extends Controller
         $mesesAmortizacion = min(8, max(1, $mesesCalculados));
 
         $diaCobro = $venta->dia_cobro ?? $venta->dia_semana ?? null;
-        $proximoPago = $venta->fecha_primer_pago ?? $venta->fecha_siguiente_pago ?? null;
+        $proximoPago = $venta->fecha_proximo_pago ?? $venta->fecha_primer_pago ?? $venta->fecha_siguiente_pago ?? null;
 
         return view('abonos.show', compact(
             'venta',
@@ -279,7 +279,7 @@ class AbonoController extends Controller
 
             $hoy = now()->format('Y-m-d H:i:s');
             $fechaActual = date('Y-m-d');
-            $usuarioActual = auth()->user()->username ?? auth()->user()->user_id_legacy ?? auth()->user()->id;
+            $usuarioActual = auth()->id(); // Siempre UUID para cruzar con users.id
 
             // Identificador de la venta para relacionar en la tabla abonos (legacy o UUID)
             $aVentaRef = $venta->venta_id_legacy ?? $venta->folio ?? $venta->id;
@@ -318,6 +318,8 @@ class AbonoController extends Controller
                 ];
                 if (Schema::hasColumn('ventas', 'saldo_restante')) $dataUpdate['saldo_restante'] = 0;
                 if (Schema::hasColumn('ventas', 'venta_restante')) $dataUpdate['venta_restante'] = 0;
+                if (Schema::hasColumn('ventas', 'fecha_proximo_pago')) $dataUpdate['fecha_proximo_pago'] = null;
+                if (Schema::hasColumn('ventas', 'nota_cobranza')) $dataUpdate['nota_cobranza'] = null;
 
                 DB::table('ventas')->where('id', $venta->id)->update($dataUpdate);
                 $mensaje = '¡Cuenta totalmente liquidada con éxito!';
@@ -346,6 +348,10 @@ class AbonoController extends Controller
 
                 if (Schema::hasColumn('ventas', 'saldo_restante')) $dataUpdate['saldo_restante'] = $nuevoSaldo;
                 if (Schema::hasColumn('ventas', 'venta_restante')) $dataUpdate['venta_restante'] = $nuevoSaldo;
+                if (Schema::hasColumn('ventas', 'fecha_proximo_pago')) {
+                    $dataUpdate['fecha_proximo_pago'] = ($nuevoSaldo <= 0) ? null : $nuevaFechaPago;
+                }
+                if (Schema::hasColumn('ventas', 'nota_cobranza')) $dataUpdate['nota_cobranza'] = null;
                 if (Schema::hasColumn('ventas', 'proximo_pago')) $dataUpdate['proximo_pago'] = $nuevaFechaPago;
                 if (Schema::hasColumn('ventas', 'fecha_siguiente_pago')) $dataUpdate['fecha_siguiente_pago'] = $nuevaFechaPago;
                 if (Schema::hasColumn('ventas', 'venta_pagof')) $dataUpdate['venta_pagof'] = $nuevaFechaPago;
@@ -569,21 +575,23 @@ class AbonoController extends Controller
         ]);
 
         $fechaNueva = Carbon::parse($request->proximo_pago);
-        
-        // Obtener el día de la semana en español para la agenda
         $diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
         $diaNombre  = $diasSemana[$fechaNueva->dayOfWeek];
 
-        // Actualizamos ÚNICAMENTE la tabla de ventas
+        $updateData = [
+            'fecha_final_pago' => $fechaNueva->format('Y-m-d'),
+            'dia_semana'       => $diaNombre,
+            'updated_at'       => now()
+        ];
+
+        if (Schema::hasColumn('ventas', 'fecha_proximo_pago')) {
+            $updateData['fecha_proximo_pago'] = $fechaNueva->format('Y-m-d');
+        }
+
         DB::table('ventas')
             ->where('id', $request->venta_id)
             ->orWhere('venta_id_legacy', $request->venta_id)
-            ->update([
-                'fecha_final_pago'  => $fechaNueva->format('Y-m-d'),
-                //'dia_cobro'     => $diaNombre,
-                'dia_semana'    => $diaNombre, // Actualiza la columna de la agenda
-                'updated_at'    => now()
-            ]);
+            ->update($updateData);
 
         return back()->with('success', 'Próxima fecha de cobro reagendada para el ' . $fechaNueva->format('d/m/Y') . '.');
     }

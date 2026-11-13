@@ -28,6 +28,7 @@ class Venta extends Model
         'frecuencia_dias',
         'frecuencia_nombre',
         'fecha_primer_pago',
+        'fecha_proximo_pago',
         'fecha_final_pago',
         'dia_semana',
         'subtotal',
@@ -38,7 +39,15 @@ class Venta extends Model
         'saldo_restante',
         'pago_cuota',
         'comentario',
+        'nota_cobranza',
         'status',
+    ];
+
+    protected $casts = [
+        'fecha_venta'        => 'date',
+        'fecha_primer_pago'  => 'date',
+        'fecha_proximo_pago' => 'date',
+        'fecha_final_pago'   => 'date',
     ];
 
     public function detalles()
@@ -60,5 +69,4 @@ class Venta extends Model
     {
         return $this->belongsTo(User::class, 'cobrador_id');
     }
-
 }

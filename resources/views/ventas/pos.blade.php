@@ -3,6 +3,13 @@
 @section('title', 'Punto de Venta - Muebles Espinosa')
 
 @section('content')
+@php
+    $esAdminPOS          = auth()->user()->isAdmin();
+    $puedeCambiarFecha   = auth()->user()->tienePermiso('pos.change_date');
+    $puedeDescontarPOS   = auth()->user()->tienePermiso('pos.discount');
+    $puedeCrearCliente   = auth()->user()->tienePermiso('clientes.create');
+@endphp
+
 <div class="container-fluid px-0" style="max-width: 1200px;">
     
     <form id="form_venta" action="{{ route('ventas.store') }}" method="POST">
@@ -32,9 +39,9 @@
                 
                 <!-- 1. VENDEDOR -->
                 <div class="col-12 col-md-3">
-                    <div class="p-2 border rounded-3 bg-light hover-card" data-bs-toggle="modal" data-bs-target="#modalVendedor">
+                    <div class="p-2 border rounded-3 bg-light {{ $esAdminPOS ? 'hover-card' : '' }}" {{ $esAdminPOS ? 'data-bs-toggle=modal data-bs-target=#modalVendedor' : '' }}>
                         <small class="text-muted fw-bold d-block extra-small">
-                            Vendedor {!! $esAdmin ? '<i class="bi bi-pencil-fill text-primary ms-1"></i>' : '' !!}
+                            Vendedor {!! $esAdminPOS ? '<i class="bi bi-pencil-fill text-primary ms-1"></i>' : '' !!}
                         </small>
                         <input type="hidden" id="input_vendedor_id" name="vendedor_id" value="{{ $vendedorIdEfectivo }}">
                         <span class="fw-bold text-dark d-block text-truncate mt-1" id="lbl_vendedor_nombre">
@@ -54,9 +61,9 @@
 
                 <!-- 3. FECHA VENTA -->
                 <div class="col-6 col-md-2">
-                    <div class="p-2 border rounded-3 bg-light {{ $esAdmin ? 'hover-card' : '' }}" {{ $esAdmin ? 'data-bs-toggle=modal data-bs-target=#modalFechaVenta' : '' }}>
+                    <div class="p-2 border rounded-3 bg-light {{ $puedeCambiarFecha ? 'hover-card' : '' }}" {{ $puedeCambiarFecha ? 'data-bs-toggle=modal data-bs-target=#modalFechaVenta' : '' }}>
                         <small class="text-muted fw-bold d-block extra-small">
-                            Fecha Venta {!! $esAdmin ? '<i class="bi bi-pencil-fill text-primary ms-1"></i>' : '<i class="bi bi-lock-fill text-secondary ms-1"></i>' !!}
+                            Fecha Venta {!! $puedeCambiarFecha ? '<i class="bi bi-pencil-fill text-primary ms-1"></i>' : '<i class="bi bi-lock-fill text-secondary ms-1"></i>' !!}
                         </small>
                         <input type="hidden" id="input_fecha_venta" name="fecha_venta" value="{{ date('Y-m-d') }}">
                         <span class="fw-semibold text-dark d-block mt-1" id="lbl_fecha_venta"><i class="bi bi-calendar-event me-1"></i> {{ date('d/m/Y') }}</span>
@@ -224,7 +231,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body py-3">
-                @if($esAdmin)
+                @if($esAdminPOS)
                     <div class="list-group list-group-flush">
                         @foreach($vendedores as $v)
                             <button type="button" class="list-group-item list-group-item-action border-0 rounded-3 py-2 mb-1" onclick="setVendedor('{{ $v->id }}', '{{ addslashes($v->username) }}')">
@@ -256,8 +263,8 @@
     </div>
 </div>
 
-<!-- MODAL FECHA VENTA (ADMIN) -->
-@if($esAdmin)
+<!-- MODAL FECHA VENTA (SOLO CON PERMISO pos.change_date) -->
+@if($puedeCambiarFecha)
 <div class="modal fade" id="modalFechaVenta" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content border-0 shadow-lg rounded-4">
@@ -315,45 +322,49 @@
                     <i class="bi bi-people text-danger me-2"></i>Seleccionar Cliente
                 </h5>
                 <div class="d-flex align-items-center gap-2">
-                    <button type="button" class="btn btn-sm btn-success rounded-pill px-3 fw-bold shadow-sm" onclick="toggleFormNuevoClientePos()">
-                        <i class="bi bi-person-plus-fill me-1"></i> + Nuevo Cliente
-                    </button>
+                    @if($puedeCrearCliente)
+                        <button type="button" class="btn btn-sm btn-success rounded-pill px-3 fw-bold shadow-sm" onclick="toggleFormNuevoClientePos()">
+                            <i class="bi bi-person-plus-fill me-1"></i> + Nuevo Cliente
+                        </button>
+                    @endif
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
             </div>
             
             <div class="modal-body py-3">
                 <!-- FORMULARIO OCULTO PARA NUEVO CLIENTE -->
-                <div id="box_nuevo_cliente_pos" class="p-3 border rounded-4 bg-light mb-3" style="display: none;">
-                    <h6 class="fw-bold text-success mb-3">
-                        <i class="bi bi-person-check-fill me-1"></i> Registro Rápido de Cliente
-                    </h6>
-                    <div class="row g-2 mb-2">
-                        <div class="col-md-6">
-                            <input type="text" id="pos_nc_nombre" class="form-control form-control-sm rounded-3" placeholder="Nombre completo (*)">
+                @if($puedeCrearCliente)
+                    <div id="box_nuevo_cliente_pos" class="p-3 border rounded-4 bg-light mb-3" style="display: none;">
+                        <h6 class="fw-bold text-success mb-3">
+                            <i class="bi bi-person-check-fill me-1"></i> Registro Rápido de Cliente
+                        </h6>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6">
+                                <input type="text" id="pos_nc_nombre" class="form-control form-control-sm rounded-3" placeholder="Nombre completo (*)">
+                            </div>
+                            <div class="col-md-6">
+                                <input type="text" id="pos_nc_telefono" class="form-control form-control-sm rounded-3" placeholder="Teléfono (10 dígitos)">
+                            </div>
                         </div>
-                        <div class="col-md-6">
-                            <input type="text" id="pos_nc_telefono" class="form-control form-control-sm rounded-3" placeholder="Teléfono (10 dígitos)">
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-4">
+                                <input type="text" id="pos_nc_ciudad" class="form-control form-control-sm rounded-3" placeholder="Ciudad / Población">
+                            </div>
+                            <div class="col-md-4">
+                                <input type="text" id="pos_nc_colonia" class="form-control form-control-sm rounded-3" placeholder="Colonia">
+                            </div>
+                            <div class="col-md-4">
+                                <input type="text" id="pos_nc_calle" class="form-control form-control-sm rounded-3" placeholder="Calle y número">
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-end gap-2">
+                            <button type="button" class="btn btn-sm btn-secondary rounded-pill px-3" onclick="toggleFormNuevoClientePos()">Cancelar</button>
+                            <button type="button" class="btn btn-sm btn-success rounded-pill px-4 fw-bold shadow-sm" onclick="guardarYAsignarClientePos()">
+                                <i class="bi bi-check-circle me-1"></i> Guardar y Asignar
+                            </button>
                         </div>
                     </div>
-                    <div class="row g-2 mb-3">
-                        <div class="col-md-4">
-                            <input type="text" id="pos_nc_ciudad" class="form-control form-control-sm rounded-3" placeholder="Ciudad / Población">
-                        </div>
-                        <div class="col-md-4">
-                            <input type="text" id="pos_nc_colonia" class="form-control form-control-sm rounded-3" placeholder="Colonia">
-                        </div>
-                        <div class="col-md-4">
-                            <input type="text" id="pos_nc_calle" class="form-control form-control-sm rounded-3" placeholder="Calle y número">
-                        </div>
-                    </div>
-                    <div class="d-flex justify-content-end gap-2">
-                        <button type="button" class="btn btn-sm btn-secondary rounded-pill px-3" onclick="toggleFormNuevoClientePos()">Cancelar</button>
-                        <button type="button" class="btn btn-sm btn-success rounded-pill px-4 fw-bold shadow-sm" onclick="guardarYAsignarClientePos()">
-                            <i class="bi bi-check-circle me-1"></i> Guardar y Asignar
-                        </button>
-                    </div>
-                </div>
+                @endif
 
                 <!-- BUSCADOR -->
                 <div class="input-group mb-3">
@@ -512,16 +523,14 @@
                                 <th class="text-end pe-3">Acción</th>
                             </tr>
                         </thead>
-                        <tbody id="tbody_catalogo_modal">
-                        </tbody>
+                        <tbody id="tbody_catalogo_modal"></tbody>
                     </table>
                 </div>
             </div>
             <div class="modal-footer border-0 pt-0 d-flex justify-content-between align-items-center">
                 <small class="text-muted" id="lbl_info_paginacion">Mostrando 0 de 0 productos</small>
                 <nav aria-label="Paginación catálogo">
-                    <ul class="pagination pagination-sm m-0" id="ul_paginacion_catalogo">
-                    </ul>
+                    <ul class="pagination pagination-sm m-0" id="ul_paginacion_catalogo"></ul>
                 </nav>
             </div>
         </div>
@@ -577,6 +586,8 @@
 </div>
 
 <script>
+    const puedeDescontarPOS = @json($puedeDescontarPOS);
+
     let carrito = [];
     let articulosDB = @json($articulosEnStock);
     let ventaProcesadaId = null;
@@ -802,7 +813,10 @@
                         <input type="text" name="articulos[${index}][n_serie]" class="form-control form-control-sm bg-light" placeholder="# Agregar S/N" value="${item.n_serie}" onchange="item.n_serie = this.value">
                     </td>
                     <td class="text-end">
-                        <input type="number" step="0.01" name="articulos[${index}][descuento]" class="form-control form-control-sm text-end" value="${item.descuento}" oninput="actualizarDescuento(${index}, this.value)">
+                        <input type="number" step="0.01" name="articulos[${index}][descuento]" 
+                               class="form-control form-control-sm text-end ${puedeDescontarPOS ? '' : 'bg-light text-muted'}" 
+                               value="${item.descuento}" 
+                               ${puedeDescontarPOS ? `oninput="actualizarDescuento(${index}, this.value)"` : 'readonly title="Sin permiso para aplicar descuentos"'}>
                     </td>
                     <td class="text-end fw-semibold">$${precioUnitario.toFixed(2)}</td>
                     <td class="text-end pe-4 fw-bold text-primary">$${subtotal.toFixed(2)}</td>
@@ -826,6 +840,7 @@
     }
 
     function actualizarDescuento(index, val) {
+        if (!puedeDescontarPOS) return;
         carrito[index].descuento = parseFloat(val) || 0;
         recalcularPreciosTabla();
     }
@@ -1136,9 +1151,9 @@
         }
     }
 
-    // TOGGLE FORMULARIO NUEVO CLIENTE
     function toggleFormNuevoClientePos() {
         const box = document.getElementById('box_nuevo_cliente_pos');
+        if (!box) return;
         if (box.style.display === 'none') {
             box.style.display = 'block';
             document.getElementById('pos_nc_nombre').focus();
@@ -1147,7 +1162,6 @@
         }
     }
 
-    // GUARDAR Y ASIGNAR CLIENTE VÍA AJAX
     function guardarYAsignarClientePos() {
         const nombre   = document.getElementById('pos_nc_nombre').value.trim();
         const telefono = document.getElementById('pos_nc_telefono').value.trim();
@@ -1179,10 +1193,8 @@
             if (data.status === 'success') {
                 const cliente = data.cliente;
 
-                // 1. Asignar cliente a la venta activa en pantalla
                 setCliente(cliente.id, cliente.nombre);
 
-                // 2. Agregar la nueva fila dinámicamente a la lista del modal sin recargar
                 const tbody = document.getElementById('tbody_clientes_modal');
                 const newTr = document.createElement('tr');
                 newTr.className = 'item-cliente-modal';
@@ -1209,14 +1221,12 @@
 
                 tbody.insertBefore(newTr, tbody.firstChild);
 
-                // 3. Resetear formulario
                 document.getElementById('pos_nc_nombre').value = '';
                 document.getElementById('pos_nc_telefono').value = '';
                 document.getElementById('pos_nc_ciudad').value = '';
                 document.getElementById('pos_nc_colonia').value = '';
                 document.getElementById('pos_nc_calle').value = '';
                 toggleFormNuevoClientePos();
-
             } else {
                 alert('❌ Error: ' + data.message);
             }
@@ -1227,7 +1237,6 @@
         });
     }
 
-    // INICIALIZACIÓN DEL DOM
     document.addEventListener('DOMContentLoaded', () => {
         alternarTipoVenta();
         articulosFiltrados = [...articulosDB];

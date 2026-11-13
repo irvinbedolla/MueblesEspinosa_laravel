@@ -3,6 +3,13 @@
 @section('title', 'Consulta de Ventas - Muebles Espinosa')
 
 @section('content')
+@php
+    $puedeEditarVenta   = auth()->user()->tienePermiso('ventas.edit');
+    $puedeEliminarVenta = auth()->user()->tienePermiso('ventas.delete');
+    $puedeVerAbonos     = auth()->user()->tienePermiso('cobranza.access');
+    $puedeGestionar     = $puedeEditarVenta || $puedeEliminarVenta;
+@endphp
+
 <div class="container-fluid px-0 px-md-2">
     
     <!-- ENCABEZADO Y BARRA DE BOTONES SUPERIORES RESPONSIVA -->
@@ -33,9 +40,11 @@
             <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'V_CREDITO'])) }}" class="btn {{ ($filtro ?? '') === 'V_CREDITO' ? 'btn-info text-white' : 'btn-outline-info' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Crédito
             </a>
-            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Eliminar'])) }}" class="btn {{ ($filtro ?? '') === 'Eliminar' ? 'btn-danger' : 'btn-outline-danger' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
-                V. Eliminadas
-            </a>
+            @if($puedeEliminarVenta)
+                <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Eliminar'])) }}" class="btn {{ ($filtro ?? '') === 'Eliminar' ? 'btn-danger' : 'btn-outline-danger' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
+                    V. Eliminadas
+                </a>
+            @endif
             <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'LISTA_NEGRA'])) }}" class="btn {{ ($filtro ?? '') === 'LISTA_NEGRA' ? 'btn-dark' : 'btn-outline-dark' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 Lista Negra
             </a>
@@ -88,15 +97,19 @@
                         <th class="text-center">Estatus</th>
 
                         @if(($filtro ?? 'Abierta') === 'Abierta')
-                            @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
+                            @if($puedeEditarVenta)
                                 <th class="text-center">Continuar</th>
                                 <th class="text-center">Pasar a Pendiente</th>
+                            @endif
+                            @if($puedeEliminarVenta)
                                 <th class="text-center pe-4">Descartar</th>
                             @endif
                         @else
                             <th class="text-center">Detalles</th>
-                            <th class="text-center pe-4">Historial</th>
-                            @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
+                            @if($puedeVerAbonos)
+                                <th class="text-center pe-4">Historial</th>
+                            @endif
+                            @if($puedeGestionar)
                                 <th class="text-center pe-4">Cambiar Estatus</th>
                             @endif
                         @endif
@@ -132,7 +145,7 @@
                             </td>
 
                             @if(($filtro ?? 'Abierta') === 'Abierta')
-                                @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
+                                @if($puedeEditarVenta)
                                     <td class="text-center">
                                         <a href="{{ route('ventas.continuar', $v->id) }}" class="btn btn-sm btn-outline-primary rounded-3 px-3 fw-semibold shadow-sm">
                                             <i class="bi bi-pencil-square me-1"></i> Abrir
@@ -147,6 +160,8 @@
                                             </button>
                                         </form>
                                     </td>
+                                @endif
+                                @if($puedeEliminarVenta)
                                     <td class="text-center pe-4">
                                         <form action="{{ route('ventas.descartar', $v->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Descartar esta venta?')">
                                             @csrf
@@ -163,12 +178,14 @@
                                         <i class="bi bi-eye me-1"></i> Ver
                                     </button>
                                 </td>
-                                <td class="text-center pe-4">
-                                    <button type="button" class="btn btn-sm btn-outline-info rounded-3 px-3 fw-semibold text-dark" onclick="verHistorialPagos('{{ $v->id }}')">
-                                        <i class="bi bi-clock-history me-1"></i> Historial
-                                    </button>
-                                </td>
-                                @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
+                                @if($puedeVerAbonos)
+                                    <td class="text-center pe-4">
+                                        <button type="button" class="btn btn-sm btn-outline-info rounded-3 px-3 fw-semibold text-dark" onclick="verHistorialPagos('{{ $v->id }}')">
+                                            <i class="bi bi-clock-history me-1"></i> Historial
+                                        </button>
+                                    </td>
+                                @endif
+                                @if($puedeGestionar)
                                     <td class="text-center pe-4">
                                         <button type="button" 
                                                 class="btn btn-sm btn-primary rounded-3 px-3 fw-semibold shadow-sm" 
@@ -225,7 +242,7 @@
                                     <th class="text-end">Precio U.</th>
                                     <th class="text-end">Total</th>
                                     <th class="text-center">Boletas / PDF</th>
-                                    @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador'))
+                                    @if($puedeEditarVenta)
                                         <th class="text-center">Cambio Art.</th>
                                     @endif
                                 </tr>
@@ -244,217 +261,230 @@
     </div>
 
     <!-- MODAL PARA CAMBIO DE ARTÍCULO -->
-    <div class="modal fade" id="modalCambiarArticuloModal" tabindex="-1" aria-hidden="true" style="z-index: 1060;">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow-lg rounded-4">
-                <div class="modal-header border-bottom-0">
-                    <h5 class="modal-title fw-bold text-dark">
-                        <i class="bi bi-arrow-repeat text-warning me-2 fs-4"></i> Sustituir Artículo en Venta
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body p-4">
-                    <form id="formCambiarArticuloModal">
-                        <input type="hidden" id="ca_venta_id">
-                        <input type="hidden" id="ca_detalle_id">
-                        <input type="hidden" id="ca_nuevo_articulo_id">
+    @if($puedeEditarVenta)
+        <div class="modal fade" id="modalCambiarArticuloModal" tabindex="-1" aria-hidden="true" style="z-index: 1060;">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content border-0 shadow-lg rounded-4">
+                    <div class="modal-header border-bottom-0">
+                        <h5 class="modal-title fw-bold text-dark">
+                            <i class="bi bi-arrow-repeat text-warning me-2 fs-4"></i> Sustituir Artículo en Venta
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <form id="formCambiarArticuloModal">
+                            <input type="hidden" id="ca_venta_id">
+                            <input type="hidden" id="ca_detalle_id">
+                            <input type="hidden" id="ca_nuevo_articulo_id">
 
-                        <div class="mb-3">
-                            <small class="text-muted fw-bold d-block">ARTÍCULO ACTUAL:</small>
-                            <strong class="text-dark fs-6" id="ca_articulo_actual_nombre">---</strong>
-                        </div>
-
-                        <div class="mb-3 position-relative">
-                            <label class="form-label text-muted fw-semibold">Seleccionar Nuevo Artículo (Stock del Vendedor)</label>
-                            <input type="text" id="ca_input_buscar_articulo" class="form-control rounded-3" placeholder="Escribe el nombre o código del artículo..." autocomplete="off">
-                            
-                            <!-- Lista desplegable predictiva -->
-                            <div id="ca_lista_resultados" class="list-group position-absolute w-100 shadow-sm d-none mt-1" style="max-height: 200px; overflow-y: auto; z-index: 1070;"></div>
-                        </div>
-
-                        <div class="row g-3 mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label text-muted fw-semibold">Precio Unitario ($)</label>
-                                <input type="number" step="0.01" id="ca_nuevo_precio" class="form-control rounded-3" placeholder="0.00" required>
+                            <div class="mb-3">
+                                <small class="text-muted fw-bold d-block">ARTÍCULO ACTUAL:</small>
+                                <strong class="text-dark fs-6" id="ca_articulo_actual_nombre">---</strong>
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label text-muted fw-semibold">Stock Disponible</label>
-                                <input type="text" id="ca_stock_disp" class="form-control bg-light rounded-3" readonly value="0 pzas">
+
+                            <div class="mb-3 position-relative">
+                                <label class="form-label text-muted fw-semibold">Seleccionar Nuevo Artículo (Stock del Vendedor)</label>
+                                <input type="text" id="ca_input_buscar_articulo" class="form-control rounded-3" placeholder="Escribe el nombre o código del artículo..." autocomplete="off">
+                                <div id="ca_lista_resultados" class="list-group position-absolute w-100 shadow-sm d-none mt-1" style="max-height: 200px; overflow-y: auto; z-index: 1070;"></div>
                             </div>
-                        </div>
 
-                        <div class="mb-3">
-                            <label class="form-label text-muted fw-semibold">Motivo del Cambio / Observación</label>
-                            <textarea id="ca_motivo" class="form-control rounded-3" rows="2" placeholder="Describe la causa del cambio de mercancía..."></textarea>
-                        </div>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted fw-semibold">Precio Unitario ($)</label>
+                                    <input type="number" step="0.01" id="ca_nuevo_precio" class="form-control rounded-3" placeholder="0.00" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted fw-semibold">Stock Disponible</label>
+                                    <input type="text" id="ca_stock_disp" class="form-control bg-light rounded-3" readonly value="0 pzas">
+                                </div>
+                            </div>
 
-                        <button type="button" onclick="guardarCambioArticuloAccion()" class="btn btn-warning text-dark rounded-pill w-100 fw-bold shadow-sm">
-                            <i class="bi bi-check-circle-fill me-1"></i> Aplicar Cambio e Incrementar/Descontar Stocks
-                        </button>
-                    </form>
+                            <div class="mb-3">
+                                <label class="form-label text-muted fw-semibold">Motivo del Cambio / Observación</label>
+                                <textarea id="ca_motivo" class="form-control rounded-3" rows="2" placeholder="Describe la causa del cambio de mercancía..."></textarea>
+                            </div>
+
+                            <button type="button" onclick="guardarCambioArticuloAccion()" class="btn btn-warning text-dark rounded-pill w-100 fw-bold shadow-sm">
+                                <i class="bi bi-check-circle-fill me-1"></i> Aplicar Cambio e Incrementar/Descontar Stocks
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    @endif
 
     <!-- MODAL HISTORIAL DE PAGOS / ABONOS -->
-    <div class="modal fade" id="modalHistorialPagos" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
-            <div class="modal-content border-0 shadow-lg rounded-4">
-                <div class="modal-header border-bottom-0 pb-0">
-                    <h5 class="modal-title fw-bold text-dark d-flex align-items-center">
-                        <i class="bi bi-clock-history text-info me-2 fs-4"></i> Historial de Abonos - Venta #<span id="lbl_historial_folio"></span>
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                
-                <div class="modal-body p-4">
-                    <div class="row g-3 mb-4">
-                        <div class="col-md-4">
-                            <div class="p-3 bg-light rounded-3 border">
-                                <small class="text-muted fw-bold d-block">CLIENTE</small>
-                                <strong class="text-dark d-block text-truncate" id="lbl_historial_cliente">---</strong>
+    @if($puedeVerAbonos)
+        <div class="modal fade" id="modalHistorialPagos" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content border-0 shadow-lg rounded-4">
+                    <div class="modal-header border-bottom-0 pb-0">
+                        <h5 class="modal-title fw-bold text-dark d-flex align-items-center">
+                            <i class="bi bi-clock-history text-info me-2 fs-4"></i> Historial de Abonos - Venta #<span id="lbl_historial_folio"></span>
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    
+                    <div class="modal-body p-4">
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-4">
+                                <div class="p-3 bg-light rounded-3 border">
+                                    <small class="text-muted fw-bold d-block">CLIENTE</small>
+                                    <strong class="text-dark d-block text-truncate" id="lbl_historial_cliente">---</strong>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="p-3 bg-light rounded-3 border">
+                                    <small class="text-muted fw-bold d-block">TOTAL VENTA</small>
+                                    <strong class="text-primary fs-5" id="lbl_historial_total">$0.00</strong>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="p-3 bg-danger bg-opacity-10 rounded-3 border border-danger">
+                                    <small class="text-danger fw-bold d-block">SALDO RESTANTE</small>
+                                    <strong class="text-danger fs-5" id="lbl_historial_saldo">$0.00</strong>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-4">
-                            <div class="p-3 bg-light rounded-3 border">
-                                <small class="text-muted fw-bold d-block">TOTAL VENTA</small>
-                                <strong class="text-primary fs-5" id="lbl_historial_total">$0.00</strong>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="p-3 bg-danger bg-opacity-10 rounded-3 border border-danger">
-                                <small class="text-danger fw-bold d-block">SALDO RESTANTE</small>
-                                <strong class="text-danger fs-5" id="lbl_historial_saldo">$0.00</strong>
-                            </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead class="table-light small text-uppercase">
+                                    <tr>
+                                        <th class="ps-3">N° Pago</th>
+                                        <th>Fecha / Hora</th>
+                                        <th>Concepto / Referencia</th>
+                                        <th class="text-end pe-3">Monto Abonado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbl_historial_body"></tbody>
+                            </table>
                         </div>
                     </div>
 
-                    <div class="table-responsive">
-                        <table class="table table-hover align-middle">
-                            <thead class="table-light small text-uppercase">
-                                <tr>
-                                    <th class="ps-3">N° Pago</th>
-                                    <th>Fecha / Hora</th>
-                                    <th>Concepto / Referencia</th>
-                                    <th class="text-end pe-3">Monto Abonado</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tbl_historial_body">
-                                <!-- Generado vía JS -->
-                            </tbody>
-                        </table>
+                    <div class="modal-footer border-top-0 pt-0">
+                        <button type="button" class="btn btn-light rounded-3 px-4 fw-bold" data-bs-dismiss="modal">Cerrar Ventana</button>
                     </div>
-                </div>
-
-                <div class="modal-footer border-top-0 pt-0">
-                    <button type="button" class="btn btn-light rounded-3 px-4 fw-bold" data-bs-dismiss="modal">Cerrar Ventana</button>
                 </div>
             </div>
         </div>
-    </div>
+    @endif
 
     <!-- MODAL GESTIÓN DE ESTATUS -->
-    <div class="modal fade" id="modalCambiarEstatus" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
-            <div class="modal-content border-0 shadow-lg rounded-4">
-                <div class="modal-header border-bottom-0 pb-0">
-                    <h5 class="modal-title fw-bold text-dark d-flex align-items-center">
-                        <i class="bi bi-sliders text-primary me-2 fs-4"></i> Gestión de Estatus para Venta <span class="badge bg-primary ms-2" id="lbl_estatus_folio">#0000</span>
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                
-                <div class="modal-body p-4">
-                    <div class="mb-3">
-                        <small class="text-muted fw-bold d-block">CLIENTE:</small>
-                        <strong class="text-dark fs-6" id="lbl_estatus_cliente">---</strong>
+    @if($puedeGestionar)
+        <div class="modal fade" id="modalCambiarEstatus" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content border-0 shadow-lg rounded-4">
+                    <div class="modal-header border-bottom-0 pb-0">
+                        <h5 class="modal-title fw-bold text-dark d-flex align-items-center">
+                            <i class="bi bi-sliders text-primary me-2 fs-4"></i> Gestión de Estatus para Venta <span class="badge bg-primary ms-2" id="lbl_estatus_folio">#0000</span>
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
-
-                    <div class="row g-4">
-                        <div class="col-md-5 border-end pe-md-4">
-                            <h6 class="fw-bold text-muted small text-uppercase mb-3">
-                                <i class="bi bi-info-circle me-1"></i> Glosario de Acciones
-                            </h6>
-                            <ul class="list-unstyled small lh-base text-secondary m-0">
-                                <li class="mb-3">
-                                    <strong class="text-success d-block">Pagado:</strong> Se cancela la deuda por completo.
-                                </li>
-                                <li class="mb-3">
-                                    <strong class="text-primary d-block">Devolución:</strong> Se regresan los artículos al inventario.
-                                </li>
-                                <li class="mb-3">
-                                    <strong class="text-warning text-dark d-block">Recogido:</strong> Regresa producto a almacén y cliente a lista negra.
-                                </li>
-                                <li class="mb-3">
-                                    <strong class="text-danger d-block">Fuga / Problema:</strong> La cuenta se suspende y el cliente va a lista negra.
-                                </li>
-                                <li class="mb-0">
-                                    <strong class="text-dark d-block">Eliminar:</strong> Borra la venta físicamente y retorna stock.
-                                </li>
-                                <li class="mb-3">
-                                    <strong class="text-warning text-dark d-block">Cambio de Artículo:</strong> Sustituye una pieza por otra del inventario del vendedor ajustando montos y stocks.
-                                </li>
-                            </ul>
+                    
+                    <div class="modal-body p-4">
+                        <div class="mb-3">
+                            <small class="text-muted fw-bold d-block">CLIENTE:</small>
+                            <strong class="text-dark fs-6" id="lbl_estatus_cliente">---</strong>
                         </div>
 
-                        <div class="col-md-7 ps-md-4">
-                            <h6 class="fw-bold text-muted small text-uppercase mb-3">
-                                <i class="bi bi-lightning me-1"></i> Seleccionar Nuevo Estado
-                            </h6>
+                        <div class="row g-4">
+                            <div class="col-md-5 border-end pe-md-4">
+                                <h6 class="fw-bold text-muted small text-uppercase mb-3">
+                                    <i class="bi bi-info-circle me-1"></i> Glosario de Acciones
+                                </h6>
+                                <ul class="list-unstyled small lh-base text-secondary m-0">
+                                    @if($puedeEditarVenta)
+                                        <li class="mb-3">
+                                            <strong class="text-success d-block">Pagado:</strong> Se cancela la deuda por completo.
+                                        </li>
+                                        <li class="mb-3">
+                                            <strong class="text-primary d-block">Devolución:</strong> Se regresan los artículos al inventario.
+                                        </li>
+                                        <li class="mb-3">
+                                            <strong class="text-warning text-dark d-block">Recogido:</strong> Regresa producto a almacén y cliente a lista negra.
+                                        </li>
+                                        <li class="mb-3">
+                                            <strong class="text-danger d-block">Fuga / Problema:</strong> La cuenta se suspende y el cliente va a lista negra.
+                                        </li>
+                                        <li class="mb-3">
+                                            <strong class="text-warning text-dark d-block">Cambio de Artículo:</strong> Sustituye una pieza por otra del inventario del vendedor ajustando montos y stocks.
+                                        </li>
+                                    @endif
+                                    @if($puedeEliminarVenta)
+                                        <li class="mb-0">
+                                            <strong class="text-dark d-block">Eliminar:</strong> Borra la venta físicamente y retorna stock.
+                                        </li>
+                                    @endif
+                                </ul>
+                            </div>
 
-                            <div class="d-grid gap-2" id="contenedor_botones_estatus">
-                                <button type="button" class="btn btn-outline-success text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Pagado', 'Marcar como Pagado', 'Se saldará la deuda por completo marcando el saldo restante en $0.00.')">
-                                    <i class="bi bi-check-circle-fill text-success me-2"></i> Marcar como Pagado
-                                </button>
+                            <div class="col-md-7 ps-md-4">
+                                <h6 class="fw-bold text-muted small text-uppercase mb-3">
+                                    <i class="bi bi-lightning me-1"></i> Seleccionar Nuevo Estado
+                                </h6>
 
-                                <button type="button" class="btn btn-outline-primary text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Devolucion', 'Aplicar Devolución', 'Se cancelará el cobro y los artículos serán retornados al inventario activo.')">
-                                    <i class="bi bi-arrow-counterclockwise text-primary me-2"></i> Aplicar Devolución
-                                </button>
+                                <div class="d-grid gap-2" id="contenedor_botones_estatus">
+                                    @if($puedeEditarVenta)
+                                        <button type="button" class="btn btn-outline-success text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Pagado', 'Marcar como Pagado', 'Se saldará la deuda por completo marcando el saldo restante en $0.00.')">
+                                            <i class="bi bi-check-circle-fill text-success me-2"></i> Marcar como Pagado
+                                        </button>
 
-                                <button type="button" class="btn btn-outline-warning text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Recogido', 'Registrar Recogido', 'Se retornarán los artículos al almacén y el cliente cambiará a estatus Recogido (Lista Negra).')">
-                                    <i class="bi bi-box-arrow-in-left text-warning me-2"></i> Registrar Recogido
-                                </button>
+                                        <button type="button" class="btn btn-outline-primary text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Devolucion', 'Aplicar Devolución', 'Se cancelará el cobro y los artículos serán retornados al inventario activo.')">
+                                            <i class="bi bi-arrow-counterclockwise text-primary me-2"></i> Aplicar Devolución
+                                        </button>
 
-                                <button type="button" class="btn btn-outline-danger text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Fuga', 'Reportar Fuga', 'La cuenta quedará suspendida y el cliente será enviado inmediatamente a la Lista Negra.')">
-                                    <i class="bi bi-person-x-fill text-danger me-2"></i> Reportar Fuga
-                                </button>
+                                        <button type="button" class="btn btn-outline-warning text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Recogido', 'Registrar Recogido', 'Se retornarán los artículos al almacén y el cliente cambiará a estatus Recogido (Lista Negra).')">
+                                            <i class="bi bi-box-arrow-in-left text-warning me-2"></i> Registrar Recogido
+                                        </button>
 
-                                <button type="button" class="btn btn-outline-secondary text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Problema', 'Marcar con Problema', 'Se registrará la observación técnica en la venta para seguimiento directo.')">
-                                    <i class="bi bi-exclamation-triangle-fill me-2"></i> Marcar con Problema
-                                </button>
+                                        <button type="button" class="btn btn-outline-danger text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Fuga', 'Reportar Fuga', 'La cuenta quedará suspendida y el cliente será enviado inmediatamente a la Lista Negra.')">
+                                            <i class="bi bi-person-x-fill text-danger me-2"></i> Reportar Fuga
+                                        </button>
 
-                                <button type="button" class="btn btn-danger text-start py-2 px-3 rounded-3 fw-bold" onclick="confirmarCambioEstatus('Eliminar', 'Eliminar Venta Permanente', '⚠️ ¡Atención! Esta acción cancelará las mercancías y desvinculará los folios asociados.')">
-                                    <i class="bi bi-trash-fill me-2"></i> Eliminar Venta Permanente
-                                </button>
+                                        <button type="button" class="btn btn-outline-secondary text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Problema', 'Marcar con Problema', 'Se registrará la observación técnica en la venta para seguimiento directo.')">
+                                            <i class="bi bi-exclamation-triangle-fill me-2"></i> Marcar con Problema
+                                        </button>
+                                    @endif
 
-                                <button type="button" class="btn btn-outline-warning text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="abrirSustitucionDesdeEstatus()">
-                                    <i class="bi bi-arrow-repeat me-2"></i> Realizar Cambio de Artículo
-                                </button>
+                                    @if($puedeEliminarVenta)
+                                        <button type="button" class="btn btn-danger text-start py-2 px-3 rounded-3 fw-bold" onclick="confirmarCambioEstatus('Eliminar', 'Eliminar Venta Permanente', '⚠️ ¡Atención! Esta acción cancelará las mercancías y desvinculará los folios asociados.')">
+                                            <i class="bi bi-trash-fill me-2"></i> Eliminar Venta Permanente
+                                        </button>
+                                    @endif
 
-                                <button type="button" class="btn btn-outline-info text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Pendiente', 'Reactivar Venta (Regresar a Pendiente)', 'Se volverá a activar el cobro y la cuenta regresará a estado Pendiente.')">
-                                    <i class="bi bi-arrow-repeat text-info me-2"></i> Reactivar Venta (Regresar a Pendiente)
-                                </button>
+                                    @if($puedeEditarVenta)
+                                        <button type="button" class="btn btn-outline-warning text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="abrirSustitucionDesdeEstatus()">
+                                            <i class="bi bi-arrow-repeat me-2"></i> Realizar Cambio de Artículo
+                                        </button>
+
+                                        <button type="button" class="btn btn-outline-info text-dark text-start py-2 px-3 rounded-3 fw-semibold" onclick="confirmarCambioEstatus('Pendiente', 'Reactivar Venta (Regresar a Pendiente)', 'Se volverá a activar el cobro y la cuenta regresará a estado Pendiente.')">
+                                            <i class="bi bi-arrow-repeat text-info me-2"></i> Reactivar Venta (Regresar a Pendiente)
+                                        </button>
+                                    @endif
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <form id="form_procesar_estatus" method="POST" action="" class="d-none">
-        @csrf
-        <input type="hidden" name="nuevo_estatus" id="hidden_nuevo_estatus">
-    </form>
+        <form id="form_procesar_estatus" method="POST" action="" class="d-none">
+            @csrf
+            <input type="hidden" name="nuevo_estatus" id="hidden_nuevo_estatus">
+        </form>
+    @endif
 
     <!-- JAVASCRIPT PRINCIPAL -->
     <script>
-        // Variables globales de estado
         window.ventaSeleccionadaActual = null;
         window.inventarioVendedorCargado = [];
         window.idVentaEstatusActiva = null;
         window.folioVentaEstatusActiva = null;
+
+        const puedeEditarVentasJS = @json($puedeEditarVenta);
 
         // 1. Cargar detalles de artículos en el modal Desglose Técnico
         window.verDetallesVenta = function(ventaId) {
@@ -470,23 +500,24 @@
                     const tbody = document.getElementById('tbl_desglose_body');
                     tbody.innerHTML = '';
 
-                    const esAdmin = {{ (auth()->user()->hasRole('admin') || auth()->user()->hasRole('administrador')) ? 'true' : 'false' }};
-
                     data.detalles.forEach(d => {
                         const nombreArt = d.nombre_articulo || (d.articulo ? d.articulo.nombre : 'Artículo');
                         const nSerie = d.numero_serie || 'S/N';
                         const subtotal = (parseFloat(d.precio_unitario) - parseFloat(d.descuento || 0)) * parseInt(d.cantidad);
 
-                        let colCambio = '';
-                        if (esAdmin) {
-                            colCambio = `
-                                <td class="text-center">
-                                    <button type="button" class="btn btn-sm btn-outline-warning text-dark rounded-3 px-2 py-1" onclick="window.abrirModalCambioArticulo('${ventaId}', '${d.id}', '${nombreArt.replace(/'/g, "\\'")}', '${d.precio_unitario}')">
-                                        <i class="bi bi-arrow-repeat me-1"></i> Sustituir
-                                    </button>
-                                </td>
-                            `;
-                        }
+                        const btnEditarSerie = puedeEditarVentasJS
+                            ? `<button type="button" class="btn btn-sm btn-outline-primary rounded-3 px-2 py-0" onclick="window.activarEdicionSerie('${d.id}', '${nSerie}')">
+                                   <i class="bi bi-pencil-square"></i> Cambiar
+                               </button>`
+                            : '';
+
+                        const colCambio = puedeEditarVentasJS
+                            ? `<td class="text-center">
+                                   <button type="button" class="btn btn-sm btn-outline-warning text-dark rounded-3 px-2 py-1" onclick="window.abrirModalCambioArticulo('${ventaId}', '${d.id}', '${nombreArt.replace(/'/g, "\\'")}', '${d.precio_unitario}')">
+                                       <i class="bi bi-arrow-repeat me-1"></i> Sustituir
+                                   </button>
+                               </td>`
+                            : '';
 
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
@@ -495,9 +526,7 @@
                             <td class="fw-bold text-dark">${nombreArt}</td>
                             <td class="text-center" id="td_serie_${d.id}">
                                 <span class="badge bg-light text-dark border px-2 py-1 me-1">${nSerie}</span>
-                                <button type="button" class="btn btn-sm btn-outline-primary rounded-3 px-2 py-0" onclick="window.activarEdicionSerie('${d.id}', '${nSerie}')">
-                                    <i class="bi bi-pencil-square"></i> Cambiar
-                                </button>
+                                ${btnEditarSerie}
                             </td>
                             <td class="text-end">$${parseFloat(d.precio_unitario).toFixed(2)}</td>
                             <td class="text-end fw-bold">$${subtotal.toFixed(2)}</td>
@@ -525,8 +554,10 @@
                 });
         };
 
-        // 2. Abrir Modal de Cambio de Artículo y solicitar inventario del vendedor
+        // 2. Abrir Modal de Cambio de Artículo
         window.abrirModalCambioArticulo = function(ventaId, detalleId, nombreArticuloActual, precioActual) {
+            if (!puedeEditarVentasJS) return;
+
             document.getElementById('ca_venta_id').value = ventaId;
             document.getElementById('ca_detalle_id').value = detalleId;
             document.getElementById('ca_articulo_actual_nombre').innerText = nombreArticuloActual;
@@ -537,21 +568,15 @@
             document.getElementById('ca_motivo').value = '';
             document.getElementById('ca_lista_resultados').classList.add('d-none');
 
-            // 1. Ocultar el modal de Desglose Técnico si está abierto para evitar el warning 'aria-hidden'
             const modalDesgloseEl = document.getElementById('modalDesgloseTecnico');
             if (modalDesgloseEl) {
                 const modalDesglose = bootstrap.Modal.getInstance(modalDesgloseEl);
-                if (modalDesglose) {
-                    modalDesglose.hide();
-                }
+                if (modalDesglose) modalDesglose.hide();
             }
 
-            // 2. Consultar el inventario validando la respuesta del servidor
             fetch(`{{ url('ventas') }}/${ventaId}/inventario-vendedor`)
                 .then(res => {
-                    if (!res.ok) {
-                        throw new Error(`El servidor respondió con estatus ${res.status}`);
-                    }
+                    if (!res.ok) throw new Error(`El servidor respondió con estatus ${res.status}`);
                     return res.json();
                 })
                 .then(data => {
@@ -569,13 +594,11 @@
                 });
         };
 
-        // 3. Abrir la ventana de sustitución directo desde el modal de estatus
+        // 3. Abrir sustitución desde modal de estatus
         window.abrirSustitucionDesdeEstatus = function() {
             const modalEstatusEl = document.getElementById('modalCambiarEstatus');
             const modalEstatus = bootstrap.Modal.getInstance(modalEstatusEl);
-            if (modalEstatus) {
-                modalEstatus.hide();
-            }
+            if (modalEstatus) modalEstatus.hide();
 
             if (window.idVentaEstatusActiva) {
                 window.verDetallesVenta(window.idVentaEstatusActiva);
@@ -596,7 +619,6 @@
                 alert('⚠️ Selecciona un nuevo artículo de la lista desplegable.');
                 return;
             }
-
             if (!nuevoPrecio || parseFloat(nuevoPrecio) < 0) {
                 alert('⚠️ Ingresa un precio unitario válido.');
                 return;
@@ -633,6 +655,7 @@
         // 5. Historial de Abonos
         window.verHistorialPagos = function(ventaId) {
             const tbody = document.getElementById('tbl_historial_body');
+            if (!tbody) return;
             tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span> Cargando historial...</td></tr>`;
 
             fetch(`{{ url('ventas') }}/${ventaId}/historial-ajax`)
@@ -675,6 +698,7 @@
 
         // 6. Editar número de serie inline
         window.activarEdicionSerie = function(detalleId, serieActual) {
+            if (!puedeEditarVentasJS) return;
             const td = document.getElementById(`td_serie_${detalleId}`);
             td.innerHTML = `
                 <div class="input-group input-group-sm">
