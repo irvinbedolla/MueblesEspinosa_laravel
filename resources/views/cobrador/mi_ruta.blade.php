@@ -22,23 +22,36 @@
     </div>
 
     <!-- ENCABEZADO DE LA RUTA -->
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
         <h5 class="fw-bold m-0 text-dark">
             <i class="bi bi-map text-primary me-2"></i>
-            <span id="lbl_nombre_ruta">Mi Ruta de Hoy ({{ \Carbon\Carbon::parse($hoy ?? date('Y-m-d'))->format('d/m/Y') }})</span>
+            <span id="lbl_nombre_ruta">Mi Ruta ({{ \Carbon\Carbon::parse($hoy ?? date('Y-m-d'))->format('d/m/Y') }})</span>
         </h5>
         <span class="badge bg-primary rounded-pill px-3 py-2" id="lbl_total_clientes">0 Clientes</span>
     </div>
 
-    <!-- PESTAÑAS / NAVEGACIÓN: PENDIENTES VS CUBIERTOS -->
+    <!-- BUSCADOR INSTANTÁNEO OFFLINE -->
+    <div class="mb-3">
+        <div class="input-group shadow-sm rounded-4 overflow-hidden">
+            <span class="input-group-text bg-white border-0 text-muted"><i class="bi bi-search"></i></span>
+            <input type="text" id="input_buscar_ruta_movil" class="form-control border-0 py-2" placeholder="Buscar cliente, folio o colonia..." onkeyup="filtrarTarjetasMovil()">
+        </div>
+    </div>
+
+    <!-- PESTAÑAS / NAVEGACIÓN: HOY vs ATRASADOS vs VISITADOS -->
     <ul class="nav nav-pills nav-fill bg-white p-1 rounded-4 shadow-sm mb-3 border" id="pills-tab" role="tablist">
         <li class="nav-item" role="presentation">
-            <button class="nav-link active rounded-3 fw-bold py-2" id="tab-pendientes-tab" data-bs-toggle="pill" data-bs-target="#tab-pendientes" type="button" role="tab">
-                <i class="bi bi-clock-history me-1"></i> Pendientes (<span id="cnt_pendientes">0</span>)
+            <button class="nav-link active rounded-3 fw-bold py-2 px-2 small" id="tab-hoy-tab" data-bs-toggle="pill" data-bs-target="#tab-hoy" type="button" role="tab">
+                <i class="bi bi-calendar-check me-1"></i> Hoy (<span id="cnt_hoy">0</span>)
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link rounded-3 fw-bold py-2" id="tab-cubiertos-tab" data-bs-toggle="pill" data-bs-target="#tab-cubiertos" type="button" role="tab">
+            <button class="nav-link rounded-3 fw-bold py-2 px-2 small text-danger" id="tab-atrasados-tab" data-bs-toggle="pill" data-bs-target="#tab-atrasados" type="button" role="tab">
+                <i class="bi bi-exclamation-circle me-1"></i> Atrasados (<span id="cnt_atrasados">0</span>)
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link rounded-3 fw-bold py-2 px-2 small text-success" id="tab-cubiertos-tab" data-bs-toggle="pill" data-bs-target="#tab-cubiertos" type="button" role="tab">
                 <i class="bi bi-check-circle me-1"></i> Visitados (<span id="cnt_cubiertos">0</span>)
             </button>
         </li>
@@ -46,8 +59,12 @@
 
     <!-- CONTENIDO DE LAS PESTAÑAS -->
     <div class="tab-content" id="pills-tabContent">
-        <div class="tab-pane fade show active" id="tab-pendientes" role="tabpanel">
-            <div class="row g-2" id="contenedor_pendientes"></div>
+        <div class="tab-pane fade show active" id="tab-hoy" role="tabpanel">
+            <div class="row g-2" id="contenedor_hoy"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-atrasados" role="tabpanel">
+            <div class="row g-2" id="contenedor_atrasados"></div>
         </div>
 
         <div class="tab-pane fade" id="tab-cubiertos" role="tabpanel">
@@ -116,7 +133,14 @@
     let clienteActivo = null;
 
     const puedeCobrar = @json(auth()->user()->tienePermiso('cobranza.register'));
-    const cuentasServidor = @json($cuentas ?? []);
+    const cuentasHoySrv = @json($cuentasHoy ?? []);
+    const cuentasAtrasadasSrv = @json($cuentasAtrasadas ?? []);
+
+    // Unificamos etiquetando el grupo de origen ('hoy' o 'atrasados')
+    const cuentasServidor = [
+        ...cuentasHoySrv.map(c => ({ ...c, _grupo: 'hoy' })),
+        ...cuentasAtrasadasSrv.map(c => ({ ...c, _grupo: 'atrasados' }))
+    ];
 
     window.addEventListener('online', actualizarIndicadorRed);
     window.addEventListener('offline', actualizarIndicadorRed);
@@ -136,8 +160,7 @@
         }
     }
 
-    // Versión 3 para evitar conflictos con la estructura anterior
-    const request = indexedDB.open("MueblesEspinosaCobrosDB", 3);
+    const request = indexedDB.open("MueblesEspinosaCobrosDB", 4);
 
     request.onupgradeneeded = function(e) {
         db = e.target.result;
@@ -159,20 +182,20 @@
     function inicializarModuloRuta() {
         if (navigator.onLine && Array.isArray(cuentasServidor)) {
             const tx = db.transaction(["ruta_cache"], "readwrite");
-            tx.objectStore("ruta_cache").put({ id: "cuentas_hoy", datos: cuentasServidor });
+            tx.objectStore("ruta_cache").put({ id: "cuentas_ruta", datos: cuentasServidor });
             
             tx.oncomplete = function() {
                 renderizarListaClientes(cuentasServidor);
             };
         } else {
             const tx = db.transaction(["ruta_cache"], "readonly");
-            const req = tx.objectStore("ruta_cache").get("cuentas_hoy");
+            const req = tx.objectStore("ruta_cache").get("cuentas_ruta");
             
             req.onsuccess = function() {
                 if (req.result && req.result.datos) {
                     renderizarListaClientes(req.result.datos);
                 } else {
-                    document.getElementById('contenedor_pendientes').innerHTML = `
+                    document.getElementById('contenedor_hoy').innerHTML = `
                         <div class="col-12 text-center py-4 text-muted">
                             <i class="bi bi-wifi-off fs-1 d-block mb-2 text-secondary"></i>
                             Sin datos en caché local. Conéctese a internet para descargar su ruta.
@@ -183,17 +206,13 @@
     }
 
     function renderizarListaClientes(listaCuentas) {
-        const contenedorPendientes = document.getElementById('contenedor_pendientes');
+        const contenedorHoy = document.getElementById('contenedor_hoy');
+        const contenedorAtrasados = document.getElementById('contenedor_atrasados');
         const contenedorCubiertos = document.getElementById('contenedor_cubiertos');
 
-        contenedorPendientes.innerHTML = '';
+        contenedorHoy.innerHTML = '';
+        contenedorAtrasados.innerHTML = '';
         contenedorCubiertos.innerHTML = '';
-
-        if (!listaCuentas || listaCuentas.length === 0) {
-            contenedorPendientes.innerHTML = `<div class="col-12 text-center py-4 text-muted">No tienes clientes pendientes por cobrar hoy.</div>`;
-            document.getElementById('lbl_total_clientes').innerText = `0 Clientes`;
-            return;
-        }
 
         document.getElementById('lbl_total_clientes').innerText = `${listaCuentas.length} Clientes`;
 
@@ -207,28 +226,36 @@
                 cobrosLocales[item.venta_id] = item;
             });
 
-            let countPendientes = 0;
+            let countHoy = 0;
+            let countAtrasados = 0;
             let countCubiertos = 0;
 
             listaCuentas.forEach(cta => {
                 const local = cobrosLocales[cta.venta_id];
                 const estaCubierto = Boolean(local || cta._visitado);
-                const statusMostrar = local ? `${local.status} (Offline)` : (cta._status_local || 'Pendiente');
-                const badgeClass = local 
-                    ? 'bg-warning text-dark border-warning' 
-                    : (cta._status_local === 'Cobrado' ? 'bg-success text-white' : 'bg-info bg-opacity-10 text-info border-info');
+                const esAtrasado = (cta._grupo === 'atrasados');
+                const diasAtraso = parseInt(cta.dias_atraso || 0);
+
+                let statusMostrar = 'Toca Hoy';
+                let badgeClass = 'bg-primary bg-opacity-10 text-primary border-primary';
+
+                if (local) {
+                    statusMostrar = `${local.status} (Offline)`;
+                    badgeClass = 'bg-warning text-dark border-warning';
+                } else if (cta._visitado) {
+                    statusMostrar = cta._status_local || 'Visitado';
+                    badgeClass = 'bg-success text-white';
+                } else if (esAtrasado) {
+                    statusMostrar = `Atrasado ${diasAtraso} ${diasAtraso === 1 ? 'día' : 'días'}`;
+                    badgeClass = 'bg-danger bg-opacity-10 text-danger border-danger';
+                }
 
                 const folio = cta.venta_id_legacy || cta.folio || 'S/F';
                 const nombreSeguro = (cta.cliente_nombre || 'Cliente').replace(/'/g, "\\'");
-
-                const botonAccion = (puedeCobrar || true) ? `
-                    <button type="button" class="btn ${estaCubierto ? 'btn-outline-secondary' : 'btn-success'} w-100 rounded-3 fw-bold py-2 shadow-sm"
-                        onclick="abrirModalRegistrarCobro('${cta.venta_id}', '${cta.cliente_id || ''}', '${nombreSeguro}', '${cta.saldo_restante}', '${cta.pago_cuota}')">
-                        <i class="bi bi-cash-coin me-1"></i> ${estaCubierto ? 'Modificar Registro' : (puedeCobrar ? 'Registrar Cobro / Visita' : 'Registrar Visita')}
-                    </button>` : '';
+                const searchData = `${cta.cliente_nombre || ''} ${folio} ${cta.colonia || ''} ${cta.calle || ''}`.toLowerCase();
 
                 const htmlCard = `
-                    <div class="col-12" id="card_venta_${cta.venta_id}">
+                    <div class="col-12 tarjeta-ruta-movil" id="card_venta_${cta.venta_id}" data-search="${searchData}">
                         <div class="card border-0 shadow-sm rounded-4 p-3 bg-white">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <div>
@@ -257,7 +284,10 @@
                                 </div>
                             </div>
 
-                            ${botonAccion}
+                            <button type="button" class="btn ${estaCubierto ? 'btn-outline-secondary' : 'btn-success'} w-100 rounded-3 fw-bold py-2 shadow-sm"
+                                onclick="abrirModalRegistrarCobro('${cta.venta_id}', '${cta.cliente_id || ''}', '${nombreSeguro}', '${cta.saldo_restante}', '${cta.pago_cuota}')">
+                                <i class="bi bi-cash-coin me-1"></i> ${estaCubierto ? 'Modificar Registro' : (puedeCobrar ? 'Registrar Cobro / Visita' : 'Registrar Visita')}
+                            </button>
                         </div>
                     </div>
                 `;
@@ -265,19 +295,39 @@
                 if (estaCubierto) {
                     contenedorCubiertos.innerHTML += htmlCard;
                     countCubiertos++;
+                } else if (esAtrasado) {
+                    contenedorAtrasados.innerHTML += htmlCard;
+                    countAtrasados++;
                 } else {
-                    contenedorPendientes.innerHTML += htmlCard;
-                    countPendientes++;
+                    contenedorHoy.innerHTML += htmlCard;
+                    countHoy++;
                 }
             });
 
-            document.getElementById('cnt_pendientes').innerText = countPendientes;
+            document.getElementById('cnt_hoy').innerText = countHoy;
+            document.getElementById('cnt_atrasados').innerText = countAtrasados;
             document.getElementById('cnt_cubiertos').innerText = countCubiertos;
 
-            if (countPendientes === 0) {
-                contenedorPendientes.innerHTML = `<div class="col-12 text-center py-4 text-success fw-bold"><i class="bi bi-check-circle-fill fs-2 d-block mb-2"></i>¡Todas las visitas pendientes de hoy han sido cubiertas!</div>`;
+            if (countHoy === 0) {
+                contenedorHoy.innerHTML = `<div class="col-12 text-center py-4 text-success fw-bold"><i class="bi bi-check-circle-fill fs-2 d-block mb-2"></i>¡No tienes cobros pendientes programados para hoy!</div>`;
             }
+            if (countAtrasados === 0) {
+                contenedorAtrasados.innerHTML = `<div class="col-12 text-center py-4 text-muted">No tienes cuentas atrasadas pendientes.</div>`;
+            }
+            if (countCubiertos === 0) {
+                contenedorCubiertos.innerHTML = `<div class="col-12 text-center py-4 text-muted">Aún no has registrado visitas hoy.</div>`;
+            }
+
+            filtrarTarjetasMovil();
         };
+    }
+
+    function filtrarTarjetasMovil() {
+        const q = (document.getElementById('input_buscar_ruta_movil')?.value || '').toLowerCase().trim();
+        document.querySelectorAll('.tarjeta-ruta-movil').forEach(card => {
+            const texto = card.getAttribute('data-search') || '';
+            card.style.display = texto.includes(q) ? '' : 'none';
+        });
     }
 
     function guardarCobroLocal() {
@@ -329,7 +379,7 @@
         tx.objectStore("cobros_pendientes").put(registro);
 
         const storeCache = tx.objectStore("ruta_cache");
-        const reqCache = storeCache.get("cuentas_hoy");
+        const reqCache = storeCache.get("cuentas_ruta");
 
         reqCache.onsuccess = function() {
             if (reqCache.result && reqCache.result.datos) {
@@ -338,7 +388,7 @@
                 if (cuenta) {
                     cuenta._visitado = true;
                     cuenta._status_local = status;
-                    storeCache.put({ id: "cuentas_hoy", datos: listaActual });
+                    storeCache.put({ id: "cuentas_ruta", datos: listaActual });
                 }
             }
         };
@@ -355,7 +405,7 @@
             actualizarConteoPendientesOffline();
 
             const txRead = db.transaction(["ruta_cache"], "readonly");
-            const reqRead = txRead.objectStore("ruta_cache").get("cuentas_hoy");
+            const reqRead = txRead.objectStore("ruta_cache").get("cuentas_ruta");
             reqRead.onsuccess = function() {
                 if (reqRead.result && reqRead.result.datos) {
                     renderizarListaClientes(reqRead.result.datos);
@@ -466,7 +516,7 @@
                 if (data && (data.status === 'success' || data.success)) {
                     const transaction = db.transaction(["cobros_pendientes", "ruta_cache"], "readwrite");
                     transaction.objectStore("cobros_pendientes").clear();
-                    transaction.objectStore("ruta_cache").delete("cuentas_hoy");
+                    transaction.objectStore("ruta_cache").delete("cuentas_ruta");
 
                     transaction.oncomplete = function() {
                         actualizarConteoPendientesOffline();

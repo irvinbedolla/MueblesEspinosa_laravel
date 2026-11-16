@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Punto de Venta - Muebles Espinosa')
+@section('title', isset($ventaEditar) ? 'Editar Venta #' . $ventaEditar->folio . ' - Muebles Espinosa' : 'Punto de Venta - Muebles Espinosa')
 
 @section('content')
 @php
@@ -8,12 +8,51 @@
     $puedeCambiarFecha   = auth()->user()->tienePermiso('pos.change_date');
     $puedeDescontarPOS   = auth()->user()->tienePermiso('pos.discount');
     $puedeCrearCliente   = auth()->user()->tienePermiso('clientes.create');
+    $puedeEliminarVenta  = auth()->user()->tienePermiso('ventas.delete');
+    $esEdicion           = isset($ventaEditar);
+
+    // Valores iniciales (Venta nueva vs Edición)
+    $vendedorNombreInit  = $esEdicion ? ($ventaEditar->vendedor->username ?? $usuarioLogueado->username) : $usuarioLogueado->username;
+    $tipoVentaInit       = $esEdicion ? $ventaEditar->tipo_venta : 'Credito';
+    $tipoVentaLabelInit  = $tipoVentaInit === 'Contado' ? '💵 Contado' : '📝 Crédito';
+    $fechaVentaInit      = $esEdicion ? \Carbon\Carbon::parse($ventaEditar->fecha_venta)->format('Y-m-d') : date('Y-m-d');
+    $fechaVentaLabelInit = \Carbon\Carbon::parse($fechaVentaInit)->format('d/m/Y');
+    $formaPagoInit       = $esEdicion ? ($ventaEditar->forma_pago ?? 'Efectivo') : 'Efectivo';
+    $formaPagoLabelInit  = $formaPagoInit === 'Transferencia' ? '🏦 Transferencia' : '💳 Efectivo';
+    $anticipoInit        = $esEdicion ? floatval($ventaEditar->anticipo ?? 0) : 0;
+    $clienteIdInit       = $esEdicion ? $ventaEditar->cliente_id : '';
+    $clienteNombreInit   = $esEdicion ? ($ventaEditar->cliente->nombre ?? 'Seleccionar...') : '';
+    $cobradorIdInit      = $esEdicion ? ($ventaEditar->cobrador_id ?? '') : '';
+    $cobradorNombreInit  = $esEdicion ? ($ventaEditar->cobrador->username ?? '') : '';
+    $frecuenciaInit      = $esEdicion ? ($ventaEditar->frecuencia_nombre ?? 'Semanal') : 'Semanal';
+    $numPagosInit        = $esEdicion ? ($ventaEditar->num_pagos ?? 1) : 1;
+    $primerPagoInit      = ($esEdicion && $ventaEditar->fecha_primer_pago) ? \Carbon\Carbon::parse($ventaEditar->fecha_primer_pago)->format('Y-m-d') : date('Y-m-d', strtotime('+7 days'));
+    $primerPagoLabelInit = \Carbon\Carbon::parse($primerPagoInit)->format('d/m/Y');
+    $diaSemanaInit       = $esEdicion ? ($ventaEditar->dia_semana ?? 'Sábado') : 'Sábado';
 @endphp
 
 <div class="container-fluid px-0" style="max-width: 1200px;">
+
+    @if($esEdicion)
+        <div class="alert alert-warning border-warning rounded-4 shadow-sm d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <div>
+                <i class="bi bi-pencil-square me-1"></i>
+                <strong>Modo Edición Activo (Venta #{{ $ventaEditar->folio }}):</strong> Puedes modificar artículos, cantidades, cliente o plan de pagos.
+                @if(($abonosPrevios ?? 0) > 0)
+                    <span class="badge bg-success ms-2">Abonos previos cobrados: ${{ number_format($abonosPrevios, 2) }}</span>
+                @endif
+            </div>
+            <a href="{{ route('ventas.index', ['filtro' => 'Pendiente']) }}" class="btn btn-sm btn-light border rounded-pill px-3 fw-semibold">
+                <i class="bi bi-arrow-left me-1"></i> Volver sin guardar
+            </a>
+        </div>
+    @endif
     
-    <form id="form_venta" action="{{ route('ventas.store') }}" method="POST">
+    <form id="form_venta" action="{{ $esEdicion ? route('ventas.update', $ventaEditar->id) : route('ventas.store') }}" method="POST">
         @csrf
+        @if($esEdicion)
+            @method('PUT')
+        @endif
 
         <!-- CABECERA PRINCIPAL POS -->
         <div class="card border-0 shadow-sm rounded-4 bg-white p-4 mb-4">
@@ -21,16 +60,32 @@
             <!-- TITULO Y ACCIONES -->
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                 <div class="d-flex align-items-center gap-2">
-                    <h4 class="fw-bold text-dark m-0"><i class="bi bi-cart3 text-primary me-2"></i>Módulo Punto de Venta</h4>
-                    <span class="badge bg-primary fs-6 px-3 py-2 rounded-pill">Folio #{{ $nuevoFolio }}</span>
+                    @if($esEdicion)
+                        <h4 class="fw-bold text-dark m-0"><i class="bi bi-pencil-square text-warning me-2"></i>Editando Venta</h4>
+                        <span class="badge bg-warning text-dark fs-6 px-3 py-2 rounded-pill">Folio #{{ $nuevoFolio }}</span>
+                    @else
+                        <h4 class="fw-bold text-dark m-0"><i class="bi bi-cart3 text-primary me-2"></i>Módulo Punto de Venta</h4>
+                        <span class="badge bg-primary fs-6 px-3 py-2 rounded-pill">Folio #{{ $nuevoFolio }}</span>
+                    @endif
                 </div>
                 <div class="d-flex gap-2">
-                    <button type="button" class="btn btn-outline-danger rounded-pill px-3 fw-semibold" onclick="resetearVenta()">
-                        <i class="bi bi-x-circle me-1"></i> Cancelar Venta
-                    </button>
-                    <button type="button" id="btn_finalizar" class="btn btn-success rounded-pill px-4 fw-bold shadow-sm" onclick="prepararResumenVenta()">
-                        <i class="bi bi-check2-circle me-1"></i> Finalizar Venta Crédito
-                    </button>
+                    @if($esEdicion)
+                        @if($puedeEliminarVenta)
+                            <button type="button" class="btn btn-outline-danger rounded-pill px-3 fw-semibold" onclick="cancelarYEliminarVentaEdicion()">
+                                <i class="bi bi-trash3 me-1"></i> Cancelar y Eliminar Venta
+                            </button>
+                        @endif
+                        <button type="button" id="btn_finalizar" class="btn btn-warning text-dark rounded-pill px-4 fw-bold shadow-sm" onclick="prepararResumenVenta()">
+                            <i class="bi bi-check2-circle me-1"></i> Guardar Cambios
+                        </button>
+                    @else
+                        <button type="button" class="btn btn-outline-danger rounded-pill px-3 fw-semibold" onclick="resetearVenta()">
+                            <i class="bi bi-x-circle me-1"></i> Cancelar Venta
+                        </button>
+                        <button type="button" id="btn_finalizar" class="btn btn-success rounded-pill px-4 fw-bold shadow-sm" onclick="prepararResumenVenta()">
+                            <i class="bi bi-check2-circle me-1"></i> Finalizar Venta Crédito
+                        </button>
+                    @endif
                 </div>
             </div>
 
@@ -45,7 +100,7 @@
                         </small>
                         <input type="hidden" id="input_vendedor_id" name="vendedor_id" value="{{ $vendedorIdEfectivo }}">
                         <span class="fw-bold text-dark d-block text-truncate mt-1" id="lbl_vendedor_nombre">
-                            <i class="bi bi-person-badge-fill text-primary me-1"></i> {{ $usuarioLogueado->username }}
+                            <i class="bi bi-person-badge-fill text-primary me-1"></i> {{ $vendedorNombreInit }}
                         </span>
                     </div>
                 </div>
@@ -54,8 +109,8 @@
                 <div class="col-6 col-md-2">
                     <div class="p-2 border rounded-3 bg-light hover-card" data-bs-toggle="modal" data-bs-target="#modalTipoVenta">
                         <small class="text-muted fw-bold d-block extra-small">Tipo Venta <i class="bi bi-pencil-fill text-primary ms-1"></i></small>
-                        <input type="hidden" id="tipo_venta" name="tipo_venta" value="Credito">
-                        <span class="fw-bold text-primary d-block mt-1" id="lbl_tipo_venta">📝 Crédito</span>
+                        <input type="hidden" id="tipo_venta" name="tipo_venta" value="{{ $tipoVentaInit }}">
+                        <span class="fw-bold text-primary d-block mt-1" id="lbl_tipo_venta">{{ $tipoVentaLabelInit }}</span>
                     </div>
                 </div>
 
@@ -65,8 +120,8 @@
                         <small class="text-muted fw-bold d-block extra-small">
                             Fecha Venta {!! $puedeCambiarFecha ? '<i class="bi bi-pencil-fill text-primary ms-1"></i>' : '<i class="bi bi-lock-fill text-secondary ms-1"></i>' !!}
                         </small>
-                        <input type="hidden" id="input_fecha_venta" name="fecha_venta" value="{{ date('Y-m-d') }}">
-                        <span class="fw-semibold text-dark d-block mt-1" id="lbl_fecha_venta"><i class="bi bi-calendar-event me-1"></i> {{ date('d/m/Y') }}</span>
+                        <input type="hidden" id="input_fecha_venta" name="fecha_venta" value="{{ $fechaVentaInit }}">
+                        <span class="fw-semibold text-dark d-block mt-1" id="lbl_fecha_venta"><i class="bi bi-calendar-event me-1"></i> {{ $fechaVentaLabelInit }}</span>
                     </div>
                 </div>
 
@@ -74,8 +129,8 @@
                 <div class="col-6 col-md-2">
                     <div class="p-2 border rounded-3 bg-light hover-card" data-bs-toggle="modal" data-bs-target="#modalFormaPago">
                         <small class="text-muted fw-bold d-block extra-small">Forma Pago <i class="bi bi-pencil-fill text-primary ms-1"></i></small>
-                        <input type="hidden" id="input_forma_pago" name="forma_pago" value="Efectivo">
-                        <span class="fw-semibold text-dark d-block mt-1" id="lbl_forma_pago">💳 Efectivo</span>
+                        <input type="hidden" id="input_forma_pago" name="forma_pago" value="{{ $formaPagoInit }}">
+                        <span class="fw-semibold text-dark d-block mt-1" id="lbl_forma_pago">{{ $formaPagoLabelInit }}</span>
                     </div>
                 </div>
 
@@ -83,8 +138,8 @@
                 <div class="col-6 col-md-1">
                     <div class="p-2 border rounded-3 bg-light hover-card" data-bs-toggle="modal" data-bs-target="#modalAnticipo">
                         <small class="text-muted fw-bold d-block extra-small">Anticipo</small>
-                        <input type="hidden" id="anticipo" name="anticipo" value="0">
-                        <span class="fw-bold text-success d-block mt-1" id="lbl_anticipo">$0</span>
+                        <input type="hidden" id="anticipo" name="anticipo" value="{{ $anticipoInit }}">
+                        <span class="fw-bold text-success d-block mt-1" id="lbl_anticipo">${{ $anticipoInit > 0 ? number_format($anticipoInit, 2) : '0' }}</span>
                     </div>
                 </div>
 
@@ -92,9 +147,13 @@
                 <div class="col-12 col-md-2">
                     <div class="p-2 border rounded-3 bg-light hover-card" data-bs-toggle="modal" data-bs-target="#modalBuscarCliente">
                         <small class="text-muted fw-bold d-block extra-small">Cliente (*)</small>
-                        <input type="hidden" id="input_cliente_id" name="cliente_id" required>
-                        <span class="fw-bold text-danger d-block text-truncate mt-1" id="lbl_cliente_nombre">
-                            <i class="bi bi-person-plus-fill me-1"></i> Seleccionar...
+                        <input type="hidden" id="input_cliente_id" name="cliente_id" value="{{ $clienteIdInit }}" required>
+                        <span class="fw-bold {{ $clienteIdInit ? 'text-dark' : 'text-danger' }} d-block text-truncate mt-1" id="lbl_cliente_nombre">
+                            @if($clienteIdInit)
+                                <i class="bi bi-person-check-fill text-success me-1"></i> {{ $clienteNombreInit }}
+                            @else
+                                <i class="bi bi-person-plus-fill me-1"></i> Seleccionar...
+                            @endif
                         </span>
                     </div>
                 </div>
@@ -113,9 +172,13 @@
                 <div class="col-6 col-md-2 campo-credito">
                     <div class="p-2 border rounded-3 bg-light border-warning hover-card" data-bs-toggle="modal" data-bs-target="#modalBuscarCobrador">
                         <small class="text-muted fw-bold d-block extra-small">Cobrador Asignado</small>
-                        <input type="hidden" id="input_cobrador_id" name="cobrador_id">
-                        <span class="fw-bold text-danger d-block text-truncate mt-1" id="lbl_cobrador_nombre">
-                            <i class="bi bi-truck me-1"></i> Seleccionar...
+                        <input type="hidden" id="input_cobrador_id" name="cobrador_id" value="{{ $cobradorIdInit }}">
+                        <span class="fw-bold {{ $cobradorIdInit ? 'text-dark' : 'text-danger' }} d-block text-truncate mt-1" id="lbl_cobrador_nombre">
+                            @if($cobradorIdInit)
+                                <i class="bi bi-check-circle-fill text-success me-1"></i> {{ $cobradorNombreInit }}
+                            @else
+                                <i class="bi bi-truck me-1"></i> Seleccionar...
+                            @endif
                         </span>
                     </div>
                 </div>
@@ -124,8 +187,8 @@
                 <div class="col-6 col-md-2 campo-credito">
                     <div class="p-2 border rounded-3 bg-warning bg-opacity-10 border-warning hover-card" data-bs-toggle="modal" data-bs-target="#modalFrecuencia">
                         <small class="text-muted fw-bold d-block extra-small">Frecuencia</small>
-                        <input type="hidden" id="frecuencia_nombre" name="frecuencia_nombre" value="Semanal">
-                        <span class="fw-bold text-dark d-block mt-1" id="lbl_frecuencia">Semanal</span>
+                        <input type="hidden" id="frecuencia_nombre" name="frecuencia_nombre" value="{{ $frecuenciaInit }}">
+                        <span class="fw-bold text-dark d-block mt-1" id="lbl_frecuencia">{{ $frecuenciaInit }}</span>
                     </div>
                 </div>
 
@@ -133,8 +196,8 @@
                 <div class="col-6 col-md-1 campo-credito">
                     <div class="p-2 border rounded-3 bg-warning bg-opacity-10 border-warning hover-card" data-bs-toggle="modal" data-bs-target="#modalPagos">
                         <small class="text-muted fw-bold d-block extra-small">Pagos</small>
-                        <input type="hidden" id="num_pagos" name="num_pagos" value="1">
-                        <span class="fw-bold text-dark d-block text-center mt-1" id="lbl_num_pagos">1</span>
+                        <input type="hidden" id="num_pagos" name="num_pagos" value="{{ $numPagosInit }}">
+                        <span class="fw-bold text-dark d-block text-center mt-1" id="lbl_num_pagos">{{ $numPagosInit }}</span>
                     </div>
                 </div>
 
@@ -142,8 +205,8 @@
                 <div class="col-6 col-md-2 campo-credito">
                     <div class="p-2 border rounded-3 bg-warning bg-opacity-10 border-warning hover-card" data-bs-toggle="modal" data-bs-target="#modalPrimerPago">
                         <small class="text-muted fw-bold d-block extra-small">1er Pago</small>
-                        <input type="hidden" id="input_fecha_primer_pago" name="fecha_primer_pago" value="{{ date('Y-m-d', strtotime('+7 days')) }}">
-                        <span class="fw-bold text-dark d-block mt-1" id="lbl_fecha_primer_pago"><i class="bi bi-calendar-check me-1"></i> {{ date('d/m/Y', strtotime('+7 days')) }}</span>
+                        <input type="hidden" id="input_fecha_primer_pago" name="fecha_primer_pago" value="{{ $primerPagoInit }}">
+                        <span class="fw-bold text-dark d-block mt-1" id="lbl_fecha_primer_pago"><i class="bi bi-calendar-check me-1"></i> {{ $primerPagoLabelInit }}</span>
                     </div>
                 </div>
 
@@ -151,8 +214,8 @@
                 <div class="col-6 col-md-1 campo-credito">
                     <div class="p-2 border rounded-3 bg-warning bg-opacity-10 border-warning hover-card" data-bs-toggle="modal" data-bs-target="#modalDiaCobro">
                         <small class="text-muted fw-bold d-block extra-small">Día</small>
-                        <input type="hidden" id="input_dia_semana" name="dia_semana" value="Sábado">
-                        <span class="fw-bold text-dark d-block text-center mt-1" id="lbl_dia_semana">Sábado</span>
+                        <input type="hidden" id="input_dia_semana" name="dia_semana" value="{{ $diaSemanaInit }}">
+                        <span class="fw-bold text-dark d-block text-center mt-1" id="lbl_dia_semana">{{ $diaSemanaInit }}</span>
                     </div>
                 </div>
 
@@ -199,8 +262,14 @@
         <!-- RESUMEN FINAL DE TOTALES -->
         <div class="card border-0 shadow-sm rounded-4 bg-white p-4">
             <div class="row justify-content-end align-items-center g-3">
+                @if($esEdicion && ($abonosPrevios ?? 0) > 0)
+                    <div class="col-md-3 text-end">
+                        <small class="text-muted fw-bold d-block">ABONOS COBRADOS</small>
+                        <h5 class="fw-bold text-success m-0">${{ number_format($abonosPrevios, 2) }}</h5>
+                    </div>
+                @endif
                 <div class="col-md-3 text-end">
-                    <small class="text-muted fw-bold d-block">SUBTOTAL</small>
+                    <small class="text-muted fw-bold d-block">SUBTOTAL / RESTANTE</small>
                     <h5 class="fw-bold text-dark m-0" id="txt_subtotal">$0.00</h5>
                     <input type="hidden" id="input_subtotal" name="subtotal" value="0">
                 </div>
@@ -218,6 +287,13 @@
         </div>
 
     </form>
+
+    @if($esEdicion && $puedeEliminarVenta)
+        <form id="form_cancelar_eliminar_venta" action="{{ route('ventas.cambiar_estatus', $ventaEditar->id) }}" method="POST" class="d-none">
+            @csrf
+            <input type="hidden" name="nuevo_estatus" value="Eliminar">
+        </form>
+    @endif
 </div>
 
 <!-- ================= MODALES FLOTANTES DE CONFIGURACIÓN ================= -->
@@ -240,7 +316,7 @@
                         @endforeach
                     </div>
                 @else
-                    <p class="text-muted small m-0">Vendedor asignado: <strong>{{ $usuarioLogueado->username }}</strong></p>
+                    <p class="text-muted small m-0">Vendedor asignado: <strong>{{ $vendedorNombreInit }}</strong></p>
                 @endif
             </div>
         </div>
@@ -263,7 +339,7 @@
     </div>
 </div>
 
-<!-- MODAL FECHA VENTA (SOLO CON PERMISO pos.change_date) -->
+<!-- MODAL FECHA VENTA -->
 @if($puedeCambiarFecha)
 <div class="modal fade" id="modalFechaVenta" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-sm">
@@ -273,7 +349,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body py-3">
-                <input type="date" id="temp_fecha_venta" class="form-control rounded-3" value="{{ date('Y-m-d') }}">
+                <input type="date" id="temp_fecha_venta" class="form-control rounded-3" value="{{ $fechaVentaInit }}">
                 <button type="button" class="btn btn-primary btn-sm rounded-pill w-100 fw-bold mt-3" onclick="setFechaVenta()">Guardar Fecha</button>
             </div>
         </div>
@@ -306,7 +382,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body py-3">
-                <input type="number" step="0.01" id="temp_anticipo" class="form-control rounded-3 fw-bold text-success" value="0" min="0">
+                <input type="number" step="0.01" id="temp_anticipo" class="form-control rounded-3 fw-bold text-success" value="{{ $anticipoInit }}" min="0">
                 <button type="button" class="btn btn-success btn-sm rounded-pill w-100 fw-bold mt-3" onclick="setAnticipo()">Aplicar Anticipo</button>
             </div>
         </div>
@@ -332,7 +408,6 @@
             </div>
             
             <div class="modal-body py-3">
-                <!-- FORMULARIO OCULTO PARA NUEVO CLIENTE -->
                 @if($puedeCrearCliente)
                     <div id="box_nuevo_cliente_pos" class="p-3 border rounded-4 bg-light mb-3" style="display: none;">
                         <h6 class="fw-bold text-success mb-3">
@@ -366,13 +441,11 @@
                     </div>
                 @endif
 
-                <!-- BUSCADOR -->
                 <div class="input-group mb-3">
                     <span class="input-group-text bg-light border-end-0"><i class="bi bi-search"></i></span>
                     <input type="text" id="input_buscar_cliente" class="form-control bg-light border-start-0 ps-0" placeholder="Buscar por nombre, ciudad o teléfono..." onkeyup="filtrarClientesModal()">
                 </div>
 
-                <!-- TABLA DE CLIENTES -->
                 <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light text-muted extra-small sticky-top">
@@ -476,7 +549,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body py-3">
-                <input type="date" id="temp_primer_pago" class="form-control rounded-3 fw-bold" value="{{ date('Y-m-d', strtotime('+7 days')) }}">
+                <input type="date" id="temp_primer_pago" class="form-control rounded-3 fw-bold" value="{{ $primerPagoInit }}">
                 <button type="button" class="btn btn-warning text-dark btn-sm rounded-pill w-100 fw-bold mt-3" onclick="setPrimerPago()">Guardar Fecha</button>
             </div>
         </div>
@@ -578,7 +651,7 @@
             <div class="modal-footer border-0 pt-0 d-flex justify-content-end gap-2">
                 <button type="button" class="btn btn-light rounded-3 fw-bold px-3" data-bs-dismiss="modal">Cancelar</button>
                 <button type="button" id="btn_confirmar_guardar" class="btn btn-success rounded-3 fw-bold px-4 shadow-sm" onclick="enviarVentaBD()">
-                    <i class="bi bi-check-lg me-1"></i> Aceptar Venta
+                    <i class="bi bi-check-lg me-1"></i> {{ $esEdicion ? 'Guardar Cambios' : 'Aceptar Venta' }}
                 </button>
             </div>
         </div>
@@ -586,11 +659,14 @@
 </div>
 
 <script>
-    const puedeDescontarPOS = @json($puedeDescontarPOS);
+    const puedeDescontarPOS  = @json($puedeDescontarPOS);
+    const esEdicionVenta     = @json($esEdicion);
+    const abonosPreviosVenta = @json(floatval($abonosPrevios ?? 0));
+    const urlGuardarVenta    = @json($esEdicion ? route('ventas.update', $ventaEditar->id) : route('ventas.store'));
 
-    let carrito = [];
+    let carrito = @json($carritoInicial ?? []);
     let articulosDB = @json($articulosEnStock);
-    let ventaProcesadaId = null;
+    let ventaProcesadaId = @json($esEdicion ? $ventaEditar->id : null);
     let detallesVentaIds = [];
     let ventaFinalizadaExitosamente = false;
 
@@ -721,12 +797,22 @@
 
         if (tipo === 'Contado') {
             camposCredito.forEach(el => el.style.display = 'none');
-            btnFinalizar.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Finalizar Venta Contado';
-            btnFinalizar.className = 'btn btn-success rounded-pill px-4 fw-bold shadow-sm';
+            if (esEdicionVenta) {
+                btnFinalizar.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Guardar Cambios (Contado)';
+                btnFinalizar.className = 'btn btn-warning text-dark rounded-pill px-4 fw-bold shadow-sm';
+            } else {
+                btnFinalizar.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Finalizar Venta Contado';
+                btnFinalizar.className = 'btn btn-success rounded-pill px-4 fw-bold shadow-sm';
+            }
         } else {
             camposCredito.forEach(el => el.style.display = 'block');
-            btnFinalizar.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Finalizar Venta Crédito';
-            btnFinalizar.className = 'btn btn-primary rounded-pill px-4 fw-bold shadow-sm';
+            if (esEdicionVenta) {
+                btnFinalizar.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Guardar Cambios (Crédito)';
+                btnFinalizar.className = 'btn btn-warning text-dark rounded-pill px-4 fw-bold shadow-sm';
+            } else {
+                btnFinalizar.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Finalizar Venta Crédito';
+                btnFinalizar.className = 'btn btn-primary rounded-pill px-4 fw-bold shadow-sm';
+            }
         }
 
         recalcularPreciosTabla();
@@ -773,20 +859,21 @@
         }
 
         carrito.forEach((item, index) => {
-            let precioUnitario = item.pcontado;
+            let precioUnitario = parseFloat(item.pcontado);
 
             if (tipo === 'Credito') {
-                const precioMesObj = item.precios_credito.find(p => p.meses === meses);
+                const precioMesObj = (item.precios_credito || []).find(p => p.meses === meses);
                 if (precioMesObj) {
                     precioUnitario = parseFloat(precioMesObj.precio_total);
                 } else {
                     const utilidades = { 1:40, 2:35, 3:30, 4:25, 5:20, 6:15, 7:10, 8:5, 9:0, 10:0, 11:0, 12:0 };
                     const pct = utilidades[meses] || 0;
-                    precioUnitario = item.pcompra + (item.pcompra * (pct / 100));
+                    precioUnitario = parseFloat(item.pcompra) + (parseFloat(item.pcompra) * (pct / 100));
                 }
             }
 
-            const subtotal = (precioUnitario * item.cantidad) - item.descuento;
+            const descuento = parseFloat(item.descuento) || 0;
+            const subtotal = (precioUnitario * item.cantidad) - descuento;
 
             tbody.innerHTML += `
                 <tr>
@@ -810,12 +897,12 @@
                         <input type="hidden" name="articulos[${index}][subtotal]" value="${subtotal}">
                     </td>
                     <td>
-                        <input type="text" name="articulos[${index}][n_serie]" class="form-control form-control-sm bg-light" placeholder="# Agregar S/N" value="${item.n_serie}" onchange="item.n_serie = this.value">
+                        <input type="text" name="articulos[${index}][n_serie]" class="form-control form-control-sm bg-light" placeholder="# Agregar S/N" value="${item.n_serie || ''}" onchange="item.n_serie = this.value">
                     </td>
                     <td class="text-end">
                         <input type="number" step="0.01" name="articulos[${index}][descuento]" 
                                class="form-control form-control-sm text-end ${puedeDescontarPOS ? '' : 'bg-light text-muted'}" 
-                               value="${item.descuento}" 
+                               value="${descuento}" 
                                ${puedeDescontarPOS ? `oninput="actualizarDescuento(${index}, this.value)"` : 'readonly title="Sin permiso para aplicar descuentos"'}>
                     </td>
                     <td class="text-end fw-semibold">$${precioUnitario.toFixed(2)}</td>
@@ -855,23 +942,21 @@
         const meses = parseInt(document.getElementById('num_pagos').value) || 1;
         const anticipo = parseFloat(document.getElementById('anticipo').value) || 0;
 
-        let subtotal = 0;
+        let totalVenta = 0;
         carrito.forEach(item => {
-            let precio = item.pcontado;
+            let precio = parseFloat(item.pcontado);
             if (tipo === 'Credito') {
-                const precioMesObj = item.precios_credito.find(p => p.meses === meses);
-                precio = precioMesObj ? parseFloat(precioMesObj.precio_total) : (item.pcompra + (item.pcompra * (({ 1:40, 2:35, 3:30, 4:25, 5:20, 6:15, 7:10, 8:5 }[meses] || 0) / 100)));
+                const precioMesObj = (item.precios_credito || []).find(p => p.meses === meses);
+                precio = precioMesObj ? parseFloat(precioMesObj.precio_total) : (parseFloat(item.pcompra) + (parseFloat(item.pcompra) * (({ 1:40, 2:35, 3:30, 4:25, 5:20, 6:15, 7:10, 8:5 }[meses] || 0) / 100)));
             }
-            subtotal += (precio * item.cantidad) - item.descuento;
+            totalVenta += (precio * item.cantidad) - (parseFloat(item.descuento) || 0);
         });
 
-        const totalVenta = subtotal;
-        subtotal = totalVenta - anticipo;
-        const saldoRestante = Math.max(0, totalVenta - anticipo);
+        const saldoRestante = Math.max(0, totalVenta - anticipo - abonosPreviosVenta);
         const cuota = (tipo === 'Credito' && meses > 0) ? (saldoRestante / meses) : saldoRestante;
 
-        document.getElementById('txt_subtotal').innerText = `$${subtotal.toFixed(2)}`;
-        document.getElementById('input_subtotal').value = subtotal.toFixed(2);
+        document.getElementById('txt_subtotal').innerText = `$${saldoRestante.toFixed(2)}`;
+        document.getElementById('input_subtotal').value = saldoRestante.toFixed(2);
 
         document.getElementById('txt_total').innerText = `$${totalVenta.toFixed(2)}`;
         document.getElementById('input_total').value = totalVenta.toFixed(2);
@@ -901,6 +986,13 @@
             carrito = [];
             document.getElementById('form_venta').reset();
             alternarTipoVenta();
+        }
+    }
+
+    function cancelarYEliminarVentaEdicion() {
+        if (confirm('⚠️ ¡ATENCIÓN! ¿Confirmas que deseas CANCELAR Y ELIMINAR por completo esta venta del sistema?\n\nLa mercancía será devuelta al inventario del vendedor y el registro quedará eliminado.')) {
+            const formDel = document.getElementById('form_cancelar_eliminar_venta');
+            if (formDel) formDel.submit();
         }
     }
 
@@ -1014,7 +1106,7 @@
 
     function prepararResumenVenta() {
         if (ventaFinalizadaExitosamente) {
-            alert('⚠️ Esta venta ya fue guardada correctamente. Haz clic en "Nueva Venta" para realizar otra operación.');
+            alert('⚠️ Esta venta ya fue guardada correctamente.');
             return;
         }
 
@@ -1034,9 +1126,12 @@
         const tipo = document.getElementById('tipo_venta').value;
         const anticipo = parseFloat(document.getElementById('anticipo').value) || 0;
         const totalVenta = parseFloat(document.getElementById('input_total').value) || 0;
-        const saldoRestante = Math.max(0, totalVenta - anticipo);
+        const saldoRestante = Math.max(0, totalVenta - anticipo - abonosPreviosVenta);
 
-        document.getElementById('txt_titulo_resumen').innerText = (tipo === 'Contado') ? 'Resumen de Venta de Contado' : 'Resumen de Venta a Crédito';
+        document.getElementById('txt_titulo_resumen').innerText = esEdicionVenta
+            ? 'Confirmar Cambios en la Venta'
+            : ((tipo === 'Contado') ? 'Resumen de Venta de Contado' : 'Resumen de Venta a Crédito');
+
         document.getElementById('resumen_cliente_nombre').innerText = document.getElementById('lbl_cliente_nombre').innerText;
         document.getElementById('resumen_forma_pago').innerText = document.getElementById('lbl_forma_pago').innerText;
         document.getElementById('resumen_total_venta').innerText = `$${totalVenta.toFixed(2)}`;
@@ -1051,7 +1146,9 @@
         
         const btnAceptar = document.getElementById('btn_confirmar_guardar');
         btnAceptar.disabled = false;
-        btnAceptar.innerHTML = '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
+        btnAceptar.innerHTML = esEdicionVenta
+            ? '<i class="bi bi-check-lg me-1"></i> Guardar Cambios'
+            : '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
 
         const modalResumenEl = document.getElementById('modalResumenVenta');
         const modalResumen = bootstrap.Modal.getInstance(modalResumenEl) || new bootstrap.Modal(modalResumenEl);
@@ -1069,8 +1166,8 @@
 
         const formData = new FormData(document.getElementById('form_venta'));
 
-        fetch("{{ route('ventas.store') }}", {
-            method: 'POST',
+        fetch(urlGuardarVenta, {
+            method: 'POST', // Laravel lee _method=PUT del FormData automáticamente
             headers: {
                 'X-CSRF-TOKEN': '{{ csrf_token() }}',
                 'Accept': 'application/json'
@@ -1092,15 +1189,23 @@
                 document.getElementById('btn_finalizar').disabled = true;
                 document.querySelectorAll('#form_venta input, #form_venta button').forEach(el => el.disabled = true);
 
-                footerModal.innerHTML = `
-                    <button type="button" class="btn btn-primary rounded-3 fw-bold px-4 shadow-sm w-100 py-2" onclick="iniciarNuevaVenta()">
-                        <i class="bi bi-plus-circle me-1"></i> Iniciar Nueva Venta
-                    </button>
-                `;
+                if (esEdicionVenta) {
+                    footerModal.innerHTML = `
+                        <a href="{{ route('ventas.index', ['filtro' => 'Pendiente']) }}" class="btn btn-primary rounded-3 fw-bold px-4 shadow-sm w-100 py-2">
+                            <i class="bi bi-arrow-left-circle me-1"></i> Volver a Consulta de Ventas Pendientes
+                        </a>
+                    `;
+                } else {
+                    footerModal.innerHTML = `
+                        <button type="button" class="btn btn-primary rounded-3 fw-bold px-4 shadow-sm w-100 py-2" onclick="iniciarNuevaVenta()">
+                            <i class="bi bi-plus-circle me-1"></i> Iniciar Nueva Venta
+                        </button>
+                    `;
+                }
             } else {
                 alert('❌ Error: ' + data.message);
                 btnAceptar.disabled = false;
-                btnAceptar.innerHTML = '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
+                btnAceptar.innerHTML = esEdicionVenta ? '<i class="bi bi-check-lg me-1"></i> Guardar Cambios' : '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
             }
         })
         .catch(err => {
@@ -1108,7 +1213,7 @@
             console.error(err);
             alert('❌ Ocurrió un error inesperado al procesar la venta.');
             btnAceptar.disabled = false;
-            btnAceptar.innerHTML = '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
+            btnAceptar.innerHTML = esEdicionVenta ? '<i class="bi bi-check-lg me-1"></i> Guardar Cambios' : '<i class="bi bi-check-lg me-1"></i> Aceptar Venta';
         });
     }
 

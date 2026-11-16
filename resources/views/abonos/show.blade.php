@@ -186,7 +186,7 @@
                         </div>
                     </div>
 
-                    <button class="btn btn-primary btn-lg w-100 rounded-3 py-3 fw-bold shadow-sm" type="submit">
+                    <button class="btn btn-primary btn-lg w-100 rounded-3 py-3 fw-bold shadow-sm" type="submit" id="btnGuardarAbono">
                         <i class="bi bi-check-circle-fill me-2"></i> GUARDAR ABONO
                     </button>
                 @else
@@ -731,20 +731,6 @@
         }
     });
 
-    function validarMontoAbono() {
-        var inputAbono = document.getElementById('abono');
-        var montoAbono = parseFloat(inputAbono.value) || 0;
-        var saldoRestante = parseFloat(inputAbono.getAttribute('data-restante')) || 0;
-        var selectTipo = document.querySelector('select[name="tipo"]');
-        var esLiquidation = (selectTipo && selectTipo.value === '2');
-
-        if (!esLiquidation && montoAbono > saldoRestante) {
-            alert("¡ATENCIÓN! La cantidad ingresada ($" + montoAbono.toFixed(2) + ") es mayor al saldo restante ($" + saldoRestante.toFixed(2) + ").");
-            inputAbono.focus();
-            return false;
-        }
-        return true;
-    }
     // 1. Guardar Teléfono vía AJAX
     function actualizarTelefonoCliente(clienteId) {
         const telInput = document.getElementById('inputTelefonoCliente');
@@ -839,7 +825,14 @@
     }
 
     // Validación de abonos
+    let enviandoAbono = false;
+
     function validarMontoAbono() {
+        // Si ya se está enviando el formulario, bloquear cualquier segundo clic
+        if (enviandoAbono) {
+            return false;
+        }
+
         const inputAbono = document.getElementById('abono');
         const montoAbono = parseFloat(inputAbono.value) || 0;
         const saldoRestante = parseFloat(inputAbono.getAttribute('data-restante')) || 0;
@@ -856,6 +849,14 @@
             alert("¡ATENCIÓN! Ingrese un monto de abono mayor a cero.");
             inputAbono.focus();
             return false;
+        }
+
+        // Activar bandera y deshabilitar botón visualmente de inmediato
+        enviandoAbono = true;
+        const btn = document.getElementById('btnGuardarAbono');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> PROCESANDO ABONO...';
         }
 
         return true;

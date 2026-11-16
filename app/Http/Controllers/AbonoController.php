@@ -110,31 +110,36 @@ class AbonoController extends Controller
         $user = auth()->user();
         $tipoSeccion = $user->isAdmin() ? 0 : 1;
 
-        // 1. Obtener la venta
+        // 1. Obtener la venta (evitando coerción numérica de UUID a 0 en MySQL)
         $venta = DB::table('ventas as v')
             ->select('v.*')
-            ->where(function($q) use ($id) {
-                $q->where('v.id', $id);
-                if (!empty($id) && $id != '0') {
-                    $q->orWhere('v.venta_id_legacy', $id)
-                      ->orWhere('v.folio', $id);
-                }
-            })
+            ->where('v.id', $id)
             ->first();
+
+        if (!$venta && ctype_digit((string) $id) && (int) $id > 0) {
+            $venta = DB::table('ventas as v')
+                ->select('v.*')
+                ->where('v.venta_id_legacy', (int) $id)
+                ->orWhere('v.folio', $id)
+                ->first();
+        }
 
         if (!$venta) {
             return redirect()->route('abonos.index')->with('error', 'No se encontró la venta especificada.');
         }
 
-        // Obtener el cliente específico vinculado a la venta
+        // Obtener el cliente específico vinculado a la venta (sin colisión UUID vs INT = 0)
         $clienteDB = null;
         if (!empty($venta->cliente_id)) {
             $clienteDB = DB::table('clientes')
                 ->where('id', $venta->cliente_id)
-                ->when(Schema::hasColumn('clientes', 'cliente_id'), function($q) use ($venta) {
-                    $q->orWhere('cliente_id', $venta->cliente_id);
-                })
                 ->first();
+
+            if (!$clienteDB && ctype_digit((string) $venta->cliente_id) && (int) $venta->cliente_id > 0 && Schema::hasColumn('clientes', 'cliente_id')) {
+                $clienteDB = DB::table('clientes')
+                    ->where('cliente_id', (int) $venta->cliente_id)
+                    ->first();
+            }
         }
 
         $cliente = (object) [
@@ -234,29 +239,30 @@ class AbonoController extends Controller
     /**
      * Procesa y guarda un nuevo abono para la venta.
      */
-    public function store(Request $request)
+public function store(Request $request)
     {
-        // Si viene por AJAX o formulario normal
         try {
-            $ventaId       = $request->input('id');
-            $montoAbono    = floatval($request->input('abono'));
-            // Si el usuario envió una fecha se usa esa; si viene vacía toma la fecha actual
+            $ventaId         = $request->input('id');
+            $montoAbono      = floatval($request->input('abono'));
             $fechaAbonoInput = $request->input('fecha');
-            $fechaAbono    = !empty($fechaAbonoInput) ? $fechaAbonoInput : date('Y-m-d');
-            
-            $formaPago     = $request->input('fpago', 'Efectivo');
-            $tipoAccion    = $request->input('tipo', 1); // 1: Normal, 2: Liquidar
-            $tipoReagendar = $request->input('tipo_reagendar', 'auto');
-            $nPagoInput    = $request->input('npago', 1);
+            $fechaAbono      = !empty($fechaAbonoInput) ? $fechaAbonoInput : date('Y-m-d');
+            $formaPago       = $request->input('fpago', 'Efectivo');
+            $tipoAccion      = $request->input('tipo', 1); // 1: Normal, 2: Liquidar
+            $tipoReagendar   = $request->input('tipo_reagendar', 'auto');
+            $nPagoInput      = $request->input('npago', 1);
 
-            // 1. Búsqueda de la Venta por UUID, ID Legacy o Folio
-            $venta = DB::table('ventas')
-                ->where('id', $ventaId)
-                ->orWhere('venta_id_legacy', $ventaId)
-                ->orWhere('folio', $ventaId)
-                ->first();
+            DB::beginTransaction();
+
+            // 1. Búsqueda con BLOQUEO DE FILA (lockForUpdate) para evitar condiciones de carrera
+            $ventaQuery = DB::table('ventas')->where('id', $ventaId);
+            if (ctype_digit((string) $ventaId) && (int) $ventaId > 0) {
+                $ventaQuery->orWhere('venta_id_legacy', (int) $ventaId)
+                           ->orWhere('folio', $ventaId);
+            }
+            $venta = $ventaQuery->lockForUpdate()->first();
 
             if (!$venta) {
+                DB::rollBack();
                 $msg = 'Error: No se encontró la venta especificada.';
                 if ($request->ajax() || $request->wantsJson()) {
                     return response()->json(['success' => false, 'message' => $msg], 404);
@@ -265,33 +271,66 @@ class AbonoController extends Controller
             }
 
             $saldoRestante = floatval($venta->saldo_restante ?? $venta->venta_restante ?? 0);
+            $montoRealCobrar = ($tipoAccion == '2') ? $saldoRestante : $montoAbono;
 
-            // 2. Validación de saldo
-            if ($tipoAccion != '2' && $montoAbono > $saldoRestante) {
-                $msg = '¡ERROR! El abono ($' . number_format($montoAbono, 2) . ') supera el saldo restante ($' . number_format($saldoRestante, 2) . ').';
+            // 2. CANDADO ANTI-DOBLE CLIC: Verificar si ya se registró este mismo abono hace menos de 15 segundos
+            $abonoReciente = DB::table('abonos')
+                ->where('venta_id', $venta->id)
+                ->where('a_cobrador', auth()->id())
+                ->where('a_pago', $montoRealCobrar)
+                ->where('created_at', '>=', now()->subSeconds(15))
+                ->exists();
+
+            if ($abonoReciente) {
+                DB::rollBack();
+                $msg = 'El abono ya fue registrado hace unos segundos (se evitó duplicado).';
+                if ($request->ajax() || $request->wantsJson()) {
+                    return response()->json([
+                        'success'  => true,
+                        'message'  => $msg,
+                        'redirect' => route('abonos.show', $venta->id)
+                    ]);
+                }
+                return redirect()->route('abonos.show', $venta->id)->with('success', $msg);
+            }
+
+            // 3. Validación de saldo y cuenta ya liquidada
+            if ($saldoRestante <= 0 || $venta->status === 'Pagado') {
+                DB::rollBack();
+                $msg = 'Esta cuenta ya se encuentra liquidada.';
+                if ($request->ajax() || $request->wantsJson()) {
+                    return response()->json(['success' => false, 'message' => $msg], 422);
+                }
+                return redirect()->route('abonos.show', $venta->id)->with('info', $msg);
+            }
+
+            if ($tipoAccion != '2' && ($montoAbono <= 0 || $montoAbono > $saldoRestante)) {
+                DB::rollBack();
+                $msg = '¡ERROR! El abono ($' . number_format($montoAbono, 2) . ') debe ser mayor a $0 y no superar el saldo restante ($' . number_format($saldoRestante, 2) . ').';
                 if ($request->ajax() || $request->wantsJson()) {
                     return response()->json(['success' => false, 'message' => $msg], 422);
                 }
                 return back()->withInput()->with('error', $msg);
             }
 
-            DB::beginTransaction();
-
             $hoy = now()->format('Y-m-d H:i:s');
             $fechaActual = date('Y-m-d');
-            $usuarioActual = auth()->id(); // Siempre UUID para cruzar con users.id
-
-            // Identificador de la venta para relacionar en la tabla abonos (legacy o UUID)
+            $usuarioActual = auth()->id();
             $aVentaRef = $venta->venta_id_legacy ?? $venta->folio ?? $venta->id;
 
-            // 3. Insertar el Registro de Abono
+            // Calcular el correlativo real en servidor para evitar números de pago repetidos
+            $correlativoReal = DB::table('abonos')
+                ->where('venta_id', $venta->id)
+                ->count() + 1;
+
+            // 4. Insertar el Registro de Abono
             $abonoData = [
                 'id'            => (string) Str::uuid(),
                 'a_venta'       => $aVentaRef,
                 'venta_id'      => $venta->id,
-                'a_pago'        => ($tipoAccion == '2') ? $saldoRestante : $montoAbono,
+                'a_pago'        => $montoRealCobrar,
                 'a_fecha'       => $fechaAbono,
-                'a_npago'       => $nPagoInput,
+                'a_npago'       => $nPagoInput ?: $correlativoReal,
                 'a_cobrador'    => $usuarioActual,
                 'a_tipopago'    => $formaPago,
                 'a_tipo'        => ($tipoAccion == '2') ? 'Liquidado' : 'Abono',
@@ -301,16 +340,14 @@ class AbonoController extends Controller
                 'updated_at'    => $hoy
             ];
 
-            // Verificar columnas existentes en la tabla abonos antes de insertar para evitar fallos
             if (Schema::hasColumn('abonos', 'a_id')) {
                 $abonoData['a_id'] = null;
             }
 
             DB::table('abonos')->insert($abonoData);
 
-            // 4. Actualización de la Venta
+            // 5. Actualización de la Venta
             if ($tipoAccion == '2') {
-                // Liquidación
                 $dataUpdate = [
                     'status'           => 'Pagado',
                     'venta_fecha_pago' => $fechaActual,
@@ -323,9 +360,7 @@ class AbonoController extends Controller
 
                 DB::table('ventas')->where('id', $venta->id)->update($dataUpdate);
                 $mensaje = '¡Cuenta totalmente liquidada con éxito!';
-
             } else {
-                // Abono Normal
                 $frecuenciaDias = intval($venta->frecuencia_dias ?? $venta->frecuencia ?? $venta->venta_frecuencia ?? 7);
                 if ($frecuenciaDias <= 0) $frecuenciaDias = 7;
 
@@ -360,18 +395,17 @@ class AbonoController extends Controller
 
                 DB::table('ventas')->where('id', $venta->id)->update($dataUpdate);
 
-                $mensaje = ($nuevoSaldo <= 0) 
-                    ? '¡Cuenta liquidada por completo!' 
+                $mensaje = ($nuevoSaldo <= 0)
+                    ? '¡Cuenta liquidada por completo!'
                     : 'Se registró el abono correctamente. Próximo cobro: ' . Carbon::parse($nuevaFechaPago)->format('d/m/Y');
             }
 
             DB::commit();
 
-            // Respuesta compatible con AJAX / Fetch y peticiones estándar
             if ($request->ajax() || $request->wantsJson()) {
                 return response()->json([
-                    'success' => true,
-                    'message' => $mensaje,
+                    'success'  => true,
+                    'message'  => $mensaje,
                     'redirect' => route('abonos.show', $venta->id)
                 ]);
             }
@@ -570,30 +604,35 @@ class AbonoController extends Controller
     public function reagendarVisita(Request $request)
     {
         $request->validate([
-            'venta_id'     => 'required',
-            'proximo_pago' => 'required|date'
+            'venta_id'    => 'required',
+            'nueva_fecha' => 'required|date',
         ]);
 
-        $fechaNueva = Carbon::parse($request->proximo_pago);
+        $ventaId    = $request->input('venta_id');
+        $nuevaFecha = $request->input('nueva_fecha');
+
         $diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        $diaNombre  = $diasSemana[$fechaNueva->dayOfWeek];
+        $nuevoDia   = $diasSemana[\Carbon\Carbon::parse($nuevaFecha)->dayOfWeek];
 
         $updateData = [
-            'fecha_final_pago' => $fechaNueva->format('Y-m-d'),
-            'dia_semana'       => $diaNombre,
-            'updated_at'       => now()
+            'fecha_proximo_pago' => $nuevaFecha,
+            'dia_semana'         => $nuevoDia,
+            'updated_at'         => now(),
         ];
 
-        if (Schema::hasColumn('ventas', 'fecha_proximo_pago')) {
-            $updateData['fecha_proximo_pago'] = $fechaNueva->format('Y-m-d');
+        if (\Illuminate\Support\Facades\Schema::hasColumn('ventas', 'fecha_final_pago')) {
+            $updateData['fecha_final_pago'] = $nuevaFecha;
         }
 
-        DB::table('ventas')
-            ->where('id', $request->venta_id)
-            ->orWhere('venta_id_legacy', $request->venta_id)
-            ->update($updateData);
+        // Evita colisión UUID vs INT en venta_id_legacy
+        $query = DB::table('ventas')->where('id', $ventaId);
+        if (ctype_digit((string) $ventaId) && (int) $ventaId > 0) {
+            $query->orWhere('venta_id_legacy', (int) $ventaId);
+        }
 
-        return back()->with('success', 'Próxima fecha de cobro reagendada para el ' . $fechaNueva->format('d/m/Y') . '.');
+        $query->update($updateData);
+
+        return back()->with('success', 'Visita reagendada correctamente para el ' . \Carbon\Carbon::parse($nuevaFecha)->format('d/m/Y'));
     }
 
     /**

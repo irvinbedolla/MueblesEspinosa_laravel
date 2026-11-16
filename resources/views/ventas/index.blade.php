@@ -8,6 +8,7 @@
     $puedeEliminarVenta = auth()->user()->tienePermiso('ventas.delete');
     $puedeVerAbonos     = auth()->user()->tienePermiso('cobranza.access');
     $puedeGestionar     = $puedeEditarVenta || $puedeEliminarVenta;
+    $esAdminUsuario     = auth()->user()->isAdmin();
 @endphp
 
 <div class="container-fluid px-0 px-md-2">
@@ -27,6 +28,9 @@
             @endphp
             <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Abierta'])) }}" class="btn {{ ($filtro ?? 'Abierta') === 'Abierta' ? 'btn-primary' : 'btn-outline-primary' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Abiertas
+            </a>
+            <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Validar'])) }}" class="btn {{ ($filtro ?? '') === 'Validar' ? 'btn-purple text-white' : 'btn-outline-secondary' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center" style="{{ ($filtro ?? '') === 'Validar' ? 'background-color: #6f42c1; border-color: #6f42c1;' : 'color: #6f42c1; border-color: #6f42c1;' }}">
+                Por Validar
             </a>
             <a href="{{ route('ventas.index', array_merge($params, ['filtro' => 'Pendiente'])) }}" class="btn {{ ($filtro ?? '') === 'Pendiente' ? 'btn-warning text-dark' : 'btn-outline-warning text-dark' }} fw-bold px-3 py-2 rounded-3 text-uppercase small flex-grow-1 flex-md-grow-0 text-center">
                 V. Pendientes
@@ -107,7 +111,13 @@
                         @else
                             <th class="text-center">Detalles</th>
                             @if($puedeVerAbonos)
-                                <th class="text-center pe-4">Historial</th>
+                                <th class="text-center">Historial</th>
+                            @endif
+                            @if(($filtro ?? '') === 'Validar' && $puedeEditarVenta)
+                                <th class="text-center">Validar</th>
+                            @endif
+                            @if(($filtro ?? '') === 'Pendiente' && $puedeEditarVenta)
+                                <th class="text-center">Editar</th>
                             @endif
                             @if($puedeGestionar)
                                 <th class="text-center pe-4">Cambiar Estatus</th>
@@ -179,10 +189,35 @@
                                     </button>
                                 </td>
                                 @if($puedeVerAbonos)
-                                    <td class="text-center pe-4">
+                                    <td class="text-center">
                                         <button type="button" class="btn btn-sm btn-outline-info rounded-3 px-3 fw-semibold text-dark" onclick="verHistorialPagos('{{ $v->id }}')">
                                             <i class="bi bi-clock-history me-1"></i> Historial
                                         </button>
+                                    </td>
+                                @endif
+                                @if(($filtro ?? '') === 'Validar' && $puedeEditarVenta)
+                                    <td class="text-center">
+                                        <form action="{{ route('ventas.pendiente', $v->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Validar venta #{{ $v->folio }} y pasarla a Pendiente?')">
+                                            @csrf
+                                            @method('PATCH')
+                                            <button type="submit" class="btn btn-sm btn-success rounded-3 px-3 fw-semibold shadow-sm">
+                                                <i class="bi bi-check2-circle me-1"></i> Pasar a Pendiente
+                                            </button>
+                                        </form>
+                                    </td>
+                                @endif
+                                @if(($filtro ?? '') === 'Pendiente' && $puedeEditarVenta)
+                                    <td class="text-center">
+                                        @if($v->status === 'Pendiente')
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-warning text-dark rounded-3 px-3 fw-semibold"
+                                                    title="Editar Venta"
+                                                    onclick="confirmarEdicionVenta('{{ $v->id }}', '{{ $v->folio }}')">
+                                                <i class="bi bi-pencil-square me-1"></i> Editar
+                                            </button>
+                                        @else
+                                            <span class="text-muted small">---</span>
+                                        @endif
                                     </td>
                                 @endif
                                 @if($puedeGestionar)
@@ -198,7 +233,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9" class="text-center text-muted py-5">
+                            <td colspan="10" class="text-center text-muted py-5">
                                 <i class="bi bi-inbox fs-3 d-block mb-2 text-secondary"></i>
                                 No hay ventas que coincidan con este estatus.
                             </td>
@@ -219,6 +254,40 @@
             </div>
         </div>
     </div>
+
+    <!-- MODAL DE ADVERTENCIA PARA EDICIÓN / CANCELACIÓN DE VENTA (SOLO PENDIENTES) -->
+    @if($puedeEditarVenta)
+        <div class="modal fade" id="modalAdvertenciaEdicion" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+            <div class="modal-dialog modal-dialog-centered modal-md">
+                <div class="modal-content rounded-4 border-0 shadow-lg">
+                    <div class="modal-header border-0 bg-warning bg-opacity-10 py-3 px-4">
+                        <h5 class="modal-title fw-bold text-dark d-flex align-items-center gap-2">
+                            <i class="bi bi-exclamation-triangle-fill text-warning fs-4"></i>
+                            ¡Alerta Importante!
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-4 text-center">
+                        <p class="fs-6 text-dark fw-semibold mb-2">
+                            Estás a punto de editar la Venta <span id="lblVentaIdModal" class="badge bg-primary px-2 py-1"></span>
+                        </p>
+                        <div class="alert alert-danger bg-danger bg-opacity-10 border-danger-subtle text-danger small mb-0 rounded-3 text-start">
+                            <i class="bi bi-info-circle-fill me-1"></i>
+                            <strong>Toma en cuenta:</strong> Si ingresas a editar esta venta y posteriormente decides <strong>cancelarla</strong> dentro del formulario, el registro se <u>borrará por completo del sistema</u>.
+                        </div>
+                    </div>
+                    <div class="modal-footer border-top-0 p-3 bg-light d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-light border text-muted fw-semibold px-3" data-bs-dismiss="modal">
+                            Cancelar
+                        </button>
+                        <a id="btnContinuarEdicion" href="#" class="btn btn-warning fw-bold px-4 shadow-sm text-dark">
+                            <i class="bi bi-pencil-square me-1"></i> Entendido, Continuar
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
 
     <!-- MODAL DESGLOSE TÉCNICO -->
     <div class="modal fade" id="modalDesgloseTecnico" tabindex="-1" aria-hidden="true">
@@ -354,8 +423,12 @@
                                     <tr>
                                         <th class="ps-3">N° Pago</th>
                                         <th>Fecha / Hora</th>
+                                        <th>Cobrador / Forma</th>
                                         <th>Concepto / Referencia</th>
                                         <th class="text-end pe-3">Monto Abonado</th>
+                                        @if($esAdminUsuario)
+                                            <th class="text-center">Eliminar</th>
+                                        @endif
                                     </tr>
                                 </thead>
                                 <tbody id="tbl_historial_body"></tbody>
@@ -485,6 +558,21 @@
         window.folioVentaEstatusActiva = null;
 
         const puedeEditarVentasJS = @json($puedeEditarVenta);
+
+        // 0. Abrir modal de advertencia antes de editar venta Pendiente
+        window.confirmarEdicionVenta = function(ventaId, folio) {
+            const lbl = document.getElementById('lblVentaIdModal');
+            const btn = document.getElementById('btnContinuarEdicion');
+
+            if (lbl) lbl.innerText = '#' + folio;
+            if (btn) btn.href = `{{ url('ventas') }}/${ventaId}/editar`;
+
+            const modalEl = document.getElementById('modalAdvertenciaEdicion');
+            if (modalEl) {
+                const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
+                inst.show();
+            }
+        };
 
         // 1. Cargar detalles de artículos en el modal Desglose Técnico
         window.verDetallesVenta = function(ventaId) {
@@ -652,11 +740,16 @@
             });
         };
 
-        // 5. Historial de Abonos
-        window.verHistorialPagos = function(ventaId) {
+        // 5. Historial de Abonos con opción de Eliminar (Admin)
+        window.ventaHistorialActualId = null;
+        const esAdminHistorialJS = @json($esAdminUsuario);
+
+        window.verHistorialPagos = function(ventaId, abrirModal = true) {
+            window.ventaHistorialActualId = ventaId;
             const tbody = document.getElementById('tbl_historial_body');
             if (!tbody) return;
-            tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span> Cargando historial...</td></tr>`;
+            const colSpan = esAdminHistorialJS ? 6 : 5;
+            tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span> Cargando historial...</td></tr>`;
 
             fetch(`{{ url('ventas') }}/${ventaId}/historial-ajax`)
                 .then(res => res.json())
@@ -669,31 +762,81 @@
                     tbody.innerHTML = '';
 
                     if (!data.abonos || data.abonos.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No se han registrado abonos para esta venta.</td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No se han registrado abonos para esta venta.</td></tr>`;
                     } else {
                         data.abonos.forEach((a, index) => {
-                            const npago = a.a_npago !== undefined ? a.a_npago : (index + 1);
-                            const monto = a.a_pago !== undefined ? a.a_pago : (a.monto || a.pago || 0);
-                            const fecha = a.created_at ? new Date(a.created_at).toLocaleDateString('es-MX') : (a.a_fecha || '---');
+                            const npago    = a.a_npago !== undefined ? a.a_npago : (index + 1);
+                            const monto    = parseFloat(a.a_pago !== undefined ? a.a_pago : (a.monto || a.pago || 0));
+                            const fechaRaw = a.a_fecha || a.created_at || '';
+                            const fecha    = fechaRaw ? new Date(fechaRaw.replace(' ', 'T')).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '---';
+                            const cobrador = (a.nombre_cobrador || 'Sistema').toUpperCase();
+                            const forma    = a.a_tipopago || 'Efectivo';
+
+                            const colEliminar = esAdminHistorialJS
+                                ? `<td class="text-center">
+                                       <button type="button" class="btn btn-sm btn-outline-danger rounded-3 px-2 py-1" title="Eliminar este abono"
+                                               onclick="window.eliminarAbonoDesdeHistorial('${a.id}', ${monto}, ${npago})">
+                                           <i class="bi bi-trash-fill"></i>
+                                       </button>
+                                   </td>`
+                                : '';
 
                             const tr = document.createElement('tr');
                             tr.innerHTML = `
                                 <td class="ps-3"><span class="badge bg-secondary bg-opacity-10 text-dark border px-2 py-1">Pago #${npago}</span></td>
                                 <td><small class="text-muted fw-semibold">${fecha}</small></td>
-                                <td><span class="small text-dark">${a.observaciones || a.concepto || 'Abono realizado'}</span></td>
-                                <td class="text-end pe-3 fw-bold text-success">+$${parseFloat(monto).toFixed(2)}</td>
+                                <td>
+                                    <span class="badge bg-primary bg-opacity-10 text-primary fw-bold">${cobrador}</span>
+                                    <small class="d-block text-muted">${forma}</small>
+                                </td>
+                                <td><span class="small text-dark">${a.observaciones || a.a_tipo || 'Abono realizado'}</span></td>
+                                <td class="text-end pe-3 fw-bold text-success">+$${monto.toFixed(2)}</td>
+                                ${colEliminar}
                             `;
                             tbody.appendChild(tr);
                         });
                     }
 
-                    const modal = new bootstrap.Modal(document.getElementById('modalHistorialPagos'));
-                    modal.show();
+                    if (abrirModal) {
+                        const modalEl = document.getElementById('modalHistorialPagos');
+                        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+                        modal.show();
+                    }
                 })
                 .catch(err => {
                     console.error(err);
                     alert('❌ No se pudo cargar el historial de pagos de esta venta.');
                 });
+        };
+
+        window.eliminarAbonoDesdeHistorial = function(abonoId, monto, npago) {
+            if (!confirm(`¿Seguro que deseas eliminar el Pago #${npago} por $${monto.toFixed(2)}?\n\nEl monto se devolverá automáticamente al saldo restante de la venta.`)) {
+                return;
+            }
+
+            fetch(`{{ url('abonos') }}/${abonoId}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert('✅ ' + data.message);
+                    if (window.ventaHistorialActualId) {
+                        window.verHistorialPagos(window.ventaHistorialActualId, false);
+                    }
+                } else {
+                    alert('❌ ' + (data.message || 'No se pudo eliminar el abono.'));
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('❌ Ocurrió un error al intentar eliminar el abono.');
+            });
         };
 
         // 6. Editar número de serie inline

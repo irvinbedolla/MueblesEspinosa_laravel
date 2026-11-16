@@ -443,26 +443,45 @@ class VentaController extends Controller
         try {
             $venta = Venta::with(['cliente'])->findOrFail($id);
 
-            $abonos = [];
-            // Verificar si la tabla 'abonos' existe en la BD legacy
-            if (\Schema::hasTable('abonos')) {
-                $abonos = \DB::table('abonos')
-                    ->where('a_venta', $id)
-                    ->orWhere('venta_id', $id)
-                    ->get();
-            }
+            $ventaUuid = trim((string) $venta->id);
+            $ventaFolio = trim((string) ($venta->folio ?? ''));
+
+            $abonosRaw = \DB::table('abonos')
+                ->where(function ($q) use ($ventaUuid, $ventaFolio) {
+                    $q->where('venta_id', $ventaUuid)
+                      ->orWhere('a_venta', $ventaUuid);
+                    if ($ventaFolio !== '') {
+                        $q->orWhere('a_venta', $ventaFolio);
+                    }
+                })
+                ->orderBy('a_npago', 'asc')
+                ->orderBy('a_fecha', 'asc')
+                ->orderBy('created_at', 'asc')
+                ->get();
+
+            $cobradorIds = $abonosRaw->pluck('a_cobrador')->filter()->unique();
+            $usuariosMap = \DB::table('users')
+                ->whereIn('id', $cobradorIds)
+                ->pluck('username', 'id');
+
+            $abonos = $abonosRaw->map(function ($ab) use ($usuariosMap) {
+                $cobKey = (string) ($ab->a_cobrador ?? '');
+                $ab->nombre_cobrador = $usuariosMap[$cobKey] ?? ($cobKey !== '' ? $cobKey : 'Sistema');
+                return $ab;
+            });
 
             return response()->json([
-                'folio' => $venta->folio,
-                'cliente' => $venta->cliente->nombre ?? 'Sin Cliente',
-                'total' => $venta->total,
-                'saldo_restante' => $venta->saldo_restante,
-                'abonos' => $abonos
+                'venta_id'       => $venta->id,
+                'folio'          => $venta->folio ?? $venta->venta_id_legacy,
+                'cliente'        => $venta->cliente->nombre ?? 'Sin Cliente',
+                'total'          => floatval($venta->total),
+                'saldo_restante' => floatval($venta->saldo_restante),
+                'abonos'         => $abonos
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
-                'error' => true,
+                'error'   => true,
                 'message' => $e->getMessage()
             ], 500);
         }
@@ -599,14 +618,19 @@ class VentaController extends Controller
                         break;
 
                     case 'Pendiente':
+                        // Si viene de 'Validar' o 'Abierta', únicamente cambiar el estatus a Pendiente sin tocar inventario ni detalles
+                        if (in_array($estatusAnterior, ['Validar', 'Abierta'])) {
+                            $venta->status = 'Pendiente';
+                            break;
+                        }
+
                         if ((float)$venta->saldo_restante <= 0) {
                             throw new \Exception("No se puede pasar a Pendiente una venta con Saldo Pendiente de $0.00.");
                         }
+
                         $estatusConStockDevuelto = ['Devolucion', 'Recogido', 'Eliminar', 'Descompuesto'];
 
                         if (in_array($estatusAnterior, $estatusConStockDevuelto)) {
-                            
-                            // Buscar disponibilidad en inventario_stock (asumiendo 'Nuevo' si fue devolución/cancelación)
                             $condicionBuscada = ($estatusAnterior === 'Devolucion') ? 'Devolución' : (($estatusAnterior === 'Recogido') ? 'Recogido' : 'Nuevo');
 
                             // 1. Validación previa de existencia
@@ -635,7 +659,7 @@ class VentaController extends Controller
                                 $nuevoStock = max(0, $stockAnterior - $detalle->cantidad);
 
                                 $stockItem->cantidad = $nuevoStock;
-                                $stockItem->numero_venta = $venta->folio; // Se asigna el folio en inventario_stock
+                                $stockItem->numero_venta = $venta->folio;
                                 $stockItem->save();
 
                                 Kardex::create([
@@ -651,9 +675,16 @@ class VentaController extends Controller
                                 ]);
                             }
                         } else {
-                            foreach ($venta->detalles as $detalle) {
-                                $detalle->status = 'Vendido';
-                                $detalle->save();
+                            if (Schema::hasColumn('venta_detalles', 'status')) {
+                                foreach ($venta->detalles as $detalle) {
+                                    $detalle->status = 'Vendido';
+                                    $detalle->save();
+                                }
+                            } elseif (Schema::hasColumn('venta_detalles', 'condicion')) {
+                                foreach ($venta->detalles as $detalle) {
+                                    $detalle->condicion = 'Vendido';
+                                    $detalle->save();
+                                }
                             }
                         }
 
@@ -679,7 +710,6 @@ class VentaController extends Controller
             return redirect()->back()->with('error', "❌ Ocurrió un inconveniente: " . $e->getMessage());
         }
     }
-
 
     /**
      * Realiza el cambio de artículo en una venta:
@@ -921,6 +951,390 @@ class VentaController extends Controller
             return response()->json([
                 'status'  => 'error',
                 'message' => 'Ocurrió un error al guardar el cliente: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    /**
+     * Elimina un abono erróneo/duplicado (Solo Admin) y restaura el saldo de la venta.
+     */
+    public function destroy(Request $request, $id)
+    {
+        if (!auth()->user()->isAdmin()) {
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => 'Solo el administrador puede eliminar abonos.'], 403);
+            }
+            abort(403, 'Solo el administrador puede eliminar abonos.');
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $abono = DB::table('abonos')->where('id', $id)->lockForUpdate()->first();
+
+            if (!$abono) {
+                DB::rollBack();
+                $msg = 'No se encontró el abono especificado.';
+                return $request->expectsJson()
+                    ? response()->json(['success' => false, 'message' => $msg], 404)
+                    : back()->with('error', $msg);
+            }
+
+            $ventaUuid = $abono->venta_id ?: $abono->a_venta;
+            $venta = DB::table('ventas')->where('id', $ventaUuid)->lockForUpdate()->first();
+
+            $montoEliminado = floatval($abono->a_pago ?? 0);
+
+            // 1. Eliminar el registro del abono
+            DB::table('abonos')->where('id', $abono->id)->delete();
+
+            $nuevoSaldo = 0;
+
+            // 2. Restaurar el saldo en la venta y reordenar correlativos (a_npago)
+            if ($venta) {
+                $saldoActual = floatval($venta->saldo_restante ?? $venta->venta_restante ?? 0);
+                $totalVenta  = floatval($venta->total ?? 0);
+                $descuento   = floatval($venta->descuento ?? 0);
+
+                $nuevoSaldo = min(max(0, $totalVenta - $descuento), $saldoActual + $montoEliminado);
+
+                $dataUpdate = [
+                    'status'     => ($nuevoSaldo > 0) ? 'Pendiente' : 'Pagado',
+                    'updated_at' => now(),
+                ];
+
+                if (Schema::hasColumn('ventas', 'saldo_restante')) {
+                    $dataUpdate['saldo_restante'] = $nuevoSaldo;
+                }
+                if (Schema::hasColumn('ventas', 'venta_restante')) {
+                    $dataUpdate['venta_restante'] = $nuevoSaldo;
+                }
+                if ($nuevoSaldo > 0 && empty($venta->fecha_proximo_pago) && Schema::hasColumn('ventas', 'fecha_proximo_pago')) {
+                    $proxima = now()->addDays(max(1, intval($venta->frecuencia_dias ?? 7)))->format('Y-m-d');
+                    $dataUpdate['fecha_proximo_pago'] = $proxima;
+                    if (Schema::hasColumn('ventas', 'fecha_final_pago')) {
+                        $dataUpdate['fecha_final_pago'] = $proxima;
+                    }
+                }
+
+                DB::table('ventas')->where('id', $venta->id)->update($dataUpdate);
+
+                // Recalcular el número de pago (a_npago) de los abonos restantes
+                $abonosRestantes = DB::table('abonos')
+                    ->where('venta_id', $venta->id)
+                    ->orderBy('a_fecha', 'asc')
+                    ->orderBy('created_at', 'asc')
+                    ->get();
+
+                $contador = 1;
+                foreach ($abonosRestantes as $abRest) {
+                    DB::table('abonos')
+                        ->where('id', $abRest->id)
+                        ->update(['a_npago' => $contador++]);
+                }
+            }
+
+            DB::commit();
+
+            $mensaje = 'Abono de $' . number_format($montoEliminado, 2) . ' eliminado y saldo restaurado correctamente.';
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success'     => true,
+                    'message'     => $mensaje,
+                    'nuevo_saldo' => $nuevoSaldo,
+                ]);
+            }
+
+            return back()->with('success', $mensaje);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $err = 'Error al eliminar el abono: ' . $e->getMessage();
+            return $request->expectsJson()
+                ? response()->json(['success' => false, 'message' => $err], 500)
+                : back()->with('error', $err);
+        }
+    }
+
+/**
+     * Abre la misma vista del POS precargada para editar una venta Pendiente
+     */
+    public function edit($id)
+    {
+        $usuarioLogueado = auth()->user();
+        $esAdmin = $usuarioLogueado->hasRole('admin') || $usuarioLogueado->role === 1;
+
+        $ventaEditar = Venta::with(['detalles.articulo.precios', 'cliente', 'vendedor', 'cobrador'])->findOrFail($id);
+
+        if ($ventaEditar->status !== 'Pendiente') {
+            return redirect()->route('ventas.index', ['filtro' => 'Pendiente'])
+                ->with('error', 'Solo se pueden editar ventas que se encuentren en estatus Pendiente.');
+        }
+
+        $nuevoFolio         = $ventaEditar->folio;
+        $vendedorIdEfectivo = $ventaEditar->vendedor_id;
+
+        $clientes   = Cliente::where('status', 'Activo')->orderBy('nombre')->get();
+        $cobradores = User::where('is_active', true)->orderBy('username')->get();
+        $vendedores = User::where('is_active', true)->orderBy('username')->get();
+
+        // Cantidades que esta venta ya tiene apartadas por artículo
+        $cantidadesEnVenta = $ventaEditar->detalles->groupBy('articulo_id')->map->sum('cantidad');
+
+        // Cargar inventario del vendedor + lo que ya tiene apartado esta venta
+        $articulosEnStock = Articulo::with(['precios', 'stocks' => function ($q) use ($vendedorIdEfectivo) {
+                $q->where('user_id', $vendedorIdEfectivo);
+            }])
+            ->where(function ($query) use ($vendedorIdEfectivo, $cantidadesEnVenta) {
+                $query->whereHas('stocks', function ($q) use ($vendedorIdEfectivo) {
+                    $q->where('user_id', $vendedorIdEfectivo)->where('cantidad', '>', 0);
+                })->orWhereIn('id', $cantidadesEnVenta->keys());
+            })
+            ->get()
+            ->map(function ($art) use ($cantidadesEnVenta) {
+                $stockItem = $art->stocks->first();
+                $stockActual = $stockItem ? (int) $stockItem->cantidad : 0;
+                $enEstaVenta = (int) ($cantidadesEnVenta[$art->id] ?? 0);
+                $art->stock_vendedor = $stockActual + $enEstaVenta;
+                $art->condicion = $stockItem->condicion ?? 'Nuevo';
+                return $art;
+            })
+            ->values();
+
+        // Carrito inicial con los detalles actuales de la venta
+        $carritoInicial = $ventaEditar->detalles->map(function ($det) use ($articulosEnStock) {
+            $artStock = $articulosEnStock->firstWhere('id', $det->articulo_id);
+            $artModel = $det->articulo;
+            return [
+                'id'              => $det->articulo_id,
+                'nombre'          => $det->nombre_articulo ?? ($artModel->nombre ?? 'Artículo'),
+                'pcompra'         => floatval($artModel->pcompra ?? 0),
+                'pcontado'        => floatval($artModel->pcontado ?? $det->precio_unitario),
+                'precios_credito' => $artModel ? $artModel->precios : [],
+                'cantidad'        => (int) $det->cantidad,
+                'n_serie'         => $det->numero_serie ?? '',
+                'descuento'       => floatval($det->descuento ?? 0),
+                'stock_max'       => $artStock ? (int) $artStock->stock_vendedor : (int) $det->cantidad,
+            ];
+        })->values();
+
+        // Abonos posteriores ya cobrados (excluyendo el Anticipo inicial)
+        $abonosPrevios = DB::table('abonos')
+            ->where(function ($q) use ($ventaEditar) {
+                $q->where('venta_id', (string) $ventaEditar->id)
+                  ->orWhere('a_venta', (string) $ventaEditar->id)
+                  ->orWhere('a_venta', (string) $ventaEditar->folio);
+            })
+            ->where('a_tipo', '!=', 'Anticipo')
+            ->sum('a_pago');
+
+        return view('ventas.pos', compact(
+            'nuevoFolio', 'clientes', 'cobradores', 'vendedores',
+            'usuarioLogueado', 'vendedorIdEfectivo', 'articulosEnStock', 'esAdmin',
+            'ventaEditar', 'carritoInicial', 'abonosPrevios'
+        ));
+    }
+
+    /**
+     * Guarda los cambios de una venta Pendiente desde el POS, ajusta inventario/Kardex y devuelve JSON
+     */
+    public function update(Request $request, $id)
+    {
+        $request->validate([
+            'cliente_id'                  => 'required|exists:clientes,id',
+            'vendedor_id'                 => 'required|exists:users,id',
+            'tipo_venta'                  => 'required|in:Contado,Credito',
+            'articulos'                   => 'required|array|min:1',
+            'articulos.*.id'              => 'required|exists:articulos,id',
+            'articulos.*.cantidad'        => 'required|integer|min:1',
+            'articulos.*.precio_unitario' => 'required|numeric|min:0',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $venta = Venta::with('detalles')->lockForUpdate()->findOrFail($id);
+
+            if ($venta->status !== 'Pendiente') {
+                throw new \Exception('Esta venta ya no se encuentra en estatus Pendiente.');
+            }
+
+            $vendedorAnteriorId = $venta->vendedor_id;
+            $vendedorNuevoId    = $request->vendedor_id;
+
+            // 1. Devolver stock de los detalles anteriores al vendedor anterior
+            foreach ($venta->detalles as $detAnterior) {
+                $stockAnt = InventarioStock::firstOrCreate(
+                    [
+                        'user_id'     => $vendedorAnteriorId,
+                        'articulo_id' => $detAnterior->articulo_id,
+                        'condicion'   => 'Nuevo',
+                    ],
+                    ['cantidad' => 0]
+                );
+
+                $cantAntes = $stockAnt->cantidad;
+                $stockAnt->cantidad = $cantAntes + $detAnterior->cantidad;
+                $stockAnt->save();
+
+                Kardex::create([
+                    'articulo_id'      => $detAnterior->articulo_id,
+                    'user_id'          => $vendedorAnteriorId,
+                    'tipo_movimiento'  => 'EDICION_VENTA_RETORNO',
+                    'cantidad'         => $detAnterior->cantidad,
+                    'stock_anterior'   => $cantAntes,
+                    'stock_nuevo'      => $stockAnt->cantidad,
+                    'referencia'       => "Edición Venta Folio #" . $venta->folio,
+                    'observaciones'    => "Retorno temporal de stock por edición de venta",
+                    'fecha_movimiento' => now(),
+                ]);
+            }
+
+            // Eliminar detalles anteriores
+            VentaDetalle::where('venta_id', $venta->id)->delete();
+
+            // 2. Insertar los nuevos detalles y descontar stock al vendedor asignado
+            $nuevoTotal = 0;
+
+            foreach ($request->articulos as $item) {
+                $articuloBD = Articulo::findOrFail($item['id']);
+                $cant       = (int) $item['cantidad'];
+                $precioU    = (float) $item['precio_unitario'];
+                $descuento  = (float) ($item['descuento'] ?? 0);
+                $subLinea   = isset($item['subtotal']) ? (float) $item['subtotal'] : max(0, ($precioU * $cant) - $descuento);
+                $nuevoTotal += $subLinea;
+
+                $detalle = new VentaDetalle();
+                $detalle->venta_id        = $venta->id;
+                $detalle->articulo_id     = $articuloBD->id;
+                $detalle->nombre_articulo = $articuloBD->nombre;
+                $detalle->cantidad        = $cant;
+                $detalle->numero_serie    = $item['n_serie'] ?? ($item['numero_serie'] ?? null);
+                $detalle->precio_unitario = $precioU;
+                $detalle->descuento       = $descuento;
+                $detalle->subtotal        = $subLinea;
+                $detalle->save();
+
+                // Verificar y descontar stock
+                $stockNuevo = InventarioStock::where('user_id', $vendedorNuevoId)
+                    ->where('articulo_id', $articuloBD->id)
+                    ->where('cantidad', '>=', $cant)
+                    ->first();
+
+                if (!$stockNuevo) {
+                    throw new \Exception("Stock insuficiente para '{$articuloBD->nombre}' en el inventario del vendedor.");
+                }
+
+                $antesDesc = $stockNuevo->cantidad;
+                $stockNuevo->cantidad = $antesDesc - $cant;
+                if (Schema::hasColumn('inventario_stock', 'numero_venta')) {
+                    $stockNuevo->numero_venta = $venta->folio;
+                }
+                $stockNuevo->save();
+
+                Kardex::create([
+                    'articulo_id'      => $articuloBD->id,
+                    'user_id'          => $vendedorNuevoId,
+                    'tipo_movimiento'  => 'EDICION_VENTA_SALIDA',
+                    'cantidad'         => $cant,
+                    'stock_anterior'   => $antesDesc,
+                    'stock_nuevo'      => $stockNuevo->cantidad,
+                    'referencia'       => "Edición Venta Folio #" . $venta->folio,
+                    'observaciones'    => "Salida actualizada por edición de venta",
+                    'fecha_movimiento' => now(),
+                ]);
+            }
+
+            // 3. Recalcular totales y saldo considerando anticipo y abonos posteriores ya cobrados
+            $nuevoAnticipo = floatval($request->anticipo ?? 0);
+            $fechaVenta    = $request->fecha_venta ?? $venta->fecha_venta;
+
+            $abonosPosteriores = DB::table('abonos')
+                ->where(function ($q) use ($venta) {
+                    $q->where('venta_id', (string) $venta->id)
+                      ->orWhere('a_venta', (string) $venta->id)
+                      ->orWhere('a_venta', (string) $venta->folio);
+                })
+                ->where('a_tipo', '!=', 'Anticipo')
+                ->sum('a_pago');
+
+            $abonoAnticipo = DB::table('abonos')
+                ->where(function ($q) use ($venta) {
+                    $q->where('venta_id', (string) $venta->id)
+                      ->orWhere('a_venta', (string) $venta->id)
+                      ->orWhere('a_venta', (string) $venta->folio);
+                })
+                ->where('a_tipo', 'Anticipo')
+                ->first();
+
+            if ($nuevoAnticipo > 0) {
+                if ($abonoAnticipo) {
+                    DB::table('abonos')->where('id', $abonoAnticipo->id)->update([
+                        'a_pago'     => $nuevoAnticipo,
+                        'a_tipopago' => $request->forma_pago ?? 'Efectivo',
+                        'updated_at' => now(),
+                    ]);
+                } else {
+                    DB::table('abonos')->insert([
+                        'id'            => (string) \Illuminate\Support\Str::uuid(),
+                        'a_venta'       => (string) $venta->folio,
+                        'venta_id'      => (string) $venta->id,
+                        'a_pago'        => $nuevoAnticipo,
+                        'a_fecha'       => $fechaVenta . ' ' . date('H:i:s'),
+                        'a_npago'       => 1,
+                        'a_cobrador'    => auth()->user()->username ?? auth()->id(),
+                        'a_tipopago'    => $request->forma_pago ?? 'Efectivo',
+                        'a_tipo'        => 'Anticipo',
+                        'a_hora'        => now(),
+                        'observaciones' => 'Pago inicial / Enganche de la venta',
+                        'created_at'    => now(),
+                        'updated_at'    => now(),
+                    ]);
+                }
+            } elseif ($abonoAnticipo) {
+                DB::table('abonos')->where('id', $abonoAnticipo->id)->delete();
+            }
+
+            $nuevoSaldo = max(0, $nuevoTotal - $nuevoAnticipo - floatval($abonosPosteriores));
+
+            // 4. Actualizar cabecera de la Venta
+            $venta->cliente_id        = $request->cliente_id;
+            $venta->vendedor_id       = $vendedorNuevoId;
+            $venta->cobrador_id       = $request->cobrador_id ?? null;
+            $venta->tipo_venta        = $request->tipo_venta;
+            $venta->fecha_venta       = $fechaVenta;
+            $venta->forma_pago        = $request->forma_pago ?? 'Efectivo';
+            $venta->subtotal          = max(0, $nuevoTotal - $nuevoAnticipo);
+            $venta->total             = $nuevoTotal;
+            $venta->anticipo          = $nuevoAnticipo;
+            $venta->saldo_restante    = $nuevoSaldo;
+            $venta->frecuencia_nombre = $request->frecuencia_nombre ?? 'Semanal';
+            $venta->frecuencia_dias   = ($request->frecuencia_nombre === 'Quincenal') ? 15 : (($request->frecuencia_nombre === 'Mensual') ? 30 : 7);
+            $venta->num_pagos         = $request->num_pagos ?? $venta->num_pagos;
+            $venta->pago_cuota        = $request->cuota_pago ?? $venta->pago_cuota;
+            $venta->fecha_primer_pago = $request->fecha_primer_pago ?? $venta->fecha_primer_pago;
+            $venta->fecha_final_pago  = $request->fecha_primer_pago ?? $venta->fecha_final_pago;
+            $venta->dia_semana        = $request->dia_semana ?? $venta->dia_semana;
+            $venta->status            = ($request->tipo_venta === 'Contado' || $nuevoSaldo <= 0) ? 'Pagado' : 'Pendiente';
+            $venta->save();
+
+            DB::commit();
+
+            return response()->json([
+                'status'   => 'success',
+                'message'  => "¡Venta Folio #{$venta->folio} actualizada exitosamente!",
+                'folio'    => $venta->folio,
+                'venta_id' => $venta->id,
+                'detalles' => VentaDetalle::where('venta_id', $venta->id)->pluck('id')
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Ocurrió un error al actualizar la venta: ' . $e->getMessage()
             ], 500);
         }
     }

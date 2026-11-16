@@ -111,6 +111,7 @@ Route::middleware(['auth'])->group(function () {
     //Rutas de cierres
     Route::get('/cierres', [CierreController::class, 'index'])->name('cierres.index');
     Route::get('/cierres/reporte-pdf', [CierreController::class, 'generarPdf'])->name('cierres.pdf');
+    Route::get('/cierres/ejecutivo', [CierreController::class, 'generarPdfEjecutivo'])->name('cierres.ejecutivo');
 
     //Rutas de reportes
     Route::get('/reportes', [ReporteController::class, 'index'])->name('reportes.index');
@@ -138,6 +139,13 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/ventas/{venta}/inventario-vendedor', [VentaController::class, 'obtenerInventarioVendedorAjax'])->name('ventas.inventario_vendedor');
     Route::post('/ventas/{venta}/cambiar-articulo', [VentaController::class, 'cambiarArticuloVenta'])->name('ventas.cambiar_articulo');
     Route::post('/ventas/{id}/cambiar-estatus', [VentaController::class, 'cambiarEstatusStatus'])->name('ventas.cambiar_estatus');
+    //Ordenamiento masivo de la agenda de cobranzas
+    Route::post('/rutas/reagendar-masivo', [RutaCobroController::class, 'reagendarMasivo'])->name('rutas.reagendarMasivo');
 
-   
+    Route::delete('/abonos/{id}', [VentaController::class, 'destroy'])->name('abonos.destroy');
+    // Editar y actualizar ventas Pendientes
+    Route::get('/ventas/{id}/editar', [VentaController::class, 'edit'])->name('ventas.edit');
+    Route::put('/ventas/{id}', [VentaController::class, 'update'])->name('ventas.update');
+    
+    
 });

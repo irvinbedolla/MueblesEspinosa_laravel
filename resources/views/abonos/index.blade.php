@@ -13,6 +13,11 @@
     .dt-search, .dt-length { display: none !important; }
 </style>
 
+@php
+    // Evaluamos el permiso UNA SOLA VEZ fuera del ciclo para evitar 1,500+ consultas N+1
+    $puedeCobrar = auth()->user()->tienePermiso('cobranza.register');
+@endphp
+
 <div class="container-fluid px-2 px-md-4 mt-4 mb-5">
     
     <!-- Panel Superior Informativo y Controles -->
@@ -124,7 +129,7 @@
                                     <span class="badge bg-light text-dark border">{{ $row->dia_semana ?? '-' }}</span>
                                 </td>
                                 <td class="text-center pe-4">
-                                    @if(auth()->user()->tienePermiso('cobranza.register'))
+                                    @if($puedeCobrar)
                                         <a href="{{ route('abonos.show', ['id' => $row->id, 'tipo' => $tipoAbono]) }}" class="btn btn-sm btn-success px-3 fw-bold rounded-3 shadow-sm">
                                             <i class="bi bi-cash me-1"></i> Cobrar
                                         </a>
@@ -152,10 +157,20 @@
 
     $j(document).ready(function() {
         var table = $j('#tablaAbonosGlobal').DataTable({
-            "pageLength": 10,
+            "pageLength": 15,
             "order": [[0, "desc"]],
+            "deferRender": true,
             "language": {
-                "url": "https://cdn.datatables.net/plug-ins/1.10.24/i18n/Spanish.json"
+                "info": "Mostrando _START_ a _END_ de _TOTAL_ registros",
+                "infoEmpty": "Mostrando 0 a 0 de 0 registros",
+                "infoFiltered": "(filtrado de _MAX_ registros totales)",
+                "zeroRecords": "No se encontraron resultados",
+                "paginate": {
+                    "first": "Primero",
+                    "last": "Último",
+                    "next": "Siguiente",
+                    "previous": "Anterior"
+                }
             },
             "dom": 'rt<"d-flex justify-content-between align-items-center w-100 flex-wrap"ip>',
             "initComplete": function() {
@@ -163,8 +178,14 @@
             }
         });
 
+        // Debounce de 250ms para que el buscador no trabe al escribir rápido
+        var searchTimer;
         $j('#buscadorGeneralInput').on('keyup', function() {
-            table.search(this.value).draw();
+            var val = this.value;
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(function() {
+                table.search(val).draw();
+            }, 250);
         });
     });
 </script>

@@ -7,75 +7,38 @@ use App\Models\Ruta;
 use App\Models\RutaDetalle;
 use App\Models\Venta;
 use App\Models\User;
+use App\Models\Cliente;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Schema;
 
 class RutaCobroController extends Controller
 {
-    /*
-    public function index(Request $request)
+    /**
+     * Expresión SQL unificada para la fecha de cobro:
+     * Prioriza fecha_proximo_pago y usa fecha_final_pago como respaldo (igual que Gestión de Abonos).
+     */
+    private function getFechaCobroSql(string $alias = 'v'): string
     {
-        $cobradores = User::whereHas('roles', function ($q) {
-            $q->where('name', 'cobrador');
-        })->get();
-
-        $ventasPendientes = Venta::with('cliente')
-            ->where('saldo_restante', '>', 0)
-            ->whereNotIn('status', ['Pagado', 'Eliminar', 'Devolucion', 'Recogido'])
-            ->orderBy('created_at', 'asc')
-            ->get();
-
-        $queryRutas = Ruta::with(['cobrador', 'detalles.venta.cliente']);
-
-        if ($request->filled('cobrador_id')) {
-            $queryRutas->where('cobrador_id', $request->cobrador_id);
-        }
-
-        if ($request->filled('fecha')) {
-            $queryRutas->whereDate('fecha_ruta', $request->fecha);
-        }
-
-        if ($request->filled('status')) {
-            $queryRutas->where('status', $request->status);
-        }
-
-        if ($request->filled('buscar')) {
-            $busqueda = $request->buscar;
-            $queryRutas->where('nombre', 'like', "%{$busqueda}%");
-        }
-
-        $rutas = $queryRutas->orderBy('fecha_ruta', 'desc')->paginate(15);
-
-        // Actualización dinámica de estatus de ruta en la PC
-        foreach ($rutas as $r) {
-            if ($r->detalles->count() > 0) {
-                $pendientes = $r->detalles->where('status', 'Pendiente')->count();
-                $nuevoEstatus = ($pendientes === 0) ? 'Completada' : 'Pendiente';
-
-                if ($r->status !== $nuevoEstatus) {
-                    $r->status = $nuevoEstatus;
-                    $r->save();
-                }
-            }
-        }
-
-        return view('rutas.index', compact('rutas', 'cobradores', 'ventasPendientes'));
+        $prefix = $alias !== '' ? "{$alias}." : '';
+        return "DATE(COALESCE(NULLIF({$prefix}fecha_proximo_pago, '0000-00-00'), NULLIF({$prefix}fecha_final_pago, '0000-00-00')))";
     }
-    */
 
     public function index(Request $request)
     {
         $user = auth()->user();
-        $esAdmin = $user->isAdmin(); // Usa el mismo método de tu CierreController
+        $esAdmin = $user->isAdmin();
         $hoy = date('Y-m-d');
+
+        // 'agenda' = fechas específicas (Hoy, Mañana, etc.) | 'atrasados' = cuentas vencidas (< hoy)
+        $vista = $request->input('vista', 'agenda');
         $fechaSeleccionada = $request->input('fecha', $hoy);
         $coloniaFiltro = $request->input('colonia', '');
+        $buscar = trim($request->input('buscar', ''));
 
         // Control estricto de acceso por rol
         if ($esAdmin) {
-            // Admin puede elegir 'todos' o un UUID específico de cobrador
             $cobradorId = $request->input('cobrador_id', 'todos');
             $cobradores = DB::table('users')
                 ->select('id', 'username')
@@ -83,12 +46,14 @@ class RutaCobroController extends Controller
                 ->orderBy('username')
                 ->get();
         } else {
-            // Cobrador: bloqueado exclusivamente a su propio ID
             $cobradorId = $user->id;
             $cobradores = collect();
         }
 
-        // Consulta base de cuentas activas con saldo
+        $fechaCobroV = $this->getFechaCobroSql('v');
+        $fechaCobroSinAlias = $this->getFechaCobroSql('');
+
+        // Consulta base de cuentas activas con saldo (leftJoin para no perder ventas migradas)
         $query = DB::table('ventas as v')
             ->select(
                 'v.id',
@@ -99,10 +64,10 @@ class RutaCobroController extends Controller
                 'v.pago_cuota',
                 'v.frecuencia_nombre',
                 'v.frecuencia_dias',
-                'v.fecha_proximo_pago',
+                DB::raw("{$fechaCobroV} as fecha_proximo_pago"),
                 'v.nota_cobranza',
                 'v.cobrador_id',
-                'c.nombre as cliente_nombre',
+                DB::raw("COALESCE(c.nombre, 'SIN CLIENTE ASIGNADO') as cliente_nombre"),
                 'c.telefono as cliente_telefono',
                 'c.calle',
                 'c.colonia',
@@ -110,65 +75,92 @@ class RutaCobroController extends Controller
                 'c.latitud',
                 'c.longitud',
                 'u.username as cobrador_nombre',
-                DB::raw("DATEDIFF('{$hoy}', v.fecha_proximo_pago) as dias_atraso")
+                DB::raw("DATEDIFF('{$hoy}', {$fechaCobroV}) as dias_atraso")
             )
-            ->join('clientes as c', 'v.cliente_id', '=', 'c.id')
+            ->leftJoin('clientes as c', 'v.cliente_id', '=', 'c.id')
             ->leftJoin('users as u', 'v.cobrador_id', '=', 'u.id')
             ->where('v.status', 'Pendiente')
-            ->where('v.saldo_restante', '>', 0);
+            ->where('v.saldo_restante', '>', 0)
+            ->whereRaw("{$fechaCobroV} IS NOT NULL");
 
         // Aplicar filtro de cobrador
         if ($cobradorId !== 'todos') {
             $query->where('v.cobrador_id', $cobradorId);
         }
 
-        // Filtro opcional por colonia (orden geográfico en calle)
+        // Filtro de búsqueda por cliente, folio o calle
+        if ($buscar !== '') {
+            $query->where(function ($q) use ($buscar) {
+                $q->where('c.nombre', 'like', "%{$buscar}%")
+                  ->orWhere('c.calle', 'like', "%{$buscar}%")
+                  ->orWhere('v.folio', 'like', "%{$buscar}%")
+                  ->orWhere('v.venta_id_legacy', 'like', "%{$buscar}%");
+            });
+        }
+
+        // Separación estricta: Atrasados (< hoy) vs Fecha exacta (= fechaSeleccionada)
+        if ($vista === 'atrasados') {
+            $query->whereRaw("{$fechaCobroV} < ?", [$hoy]);
+        } else {
+            $query->whereRaw("{$fechaCobroV} = ?", [$fechaSeleccionada]);
+        }
+
+        // Obtener colonias disponibles antes de filtrar por colonia para no vaciar el select
+        $colonias = (clone $query)->pluck('colonia')->filter()->unique()->sort()->values();
+
+        // Filtro opcional por colonia
         if (!empty($coloniaFiltro)) {
             $query->where('c.colonia', $coloniaFiltro);
         }
 
-        // Regla de acumulación: HOY incluye atrasadas (<= hoy); días futuros solo su fecha exacta
-        if ($fechaSeleccionada === $hoy) {
-            $query->whereDate('v.fecha_proximo_pago', '<=', $hoy);
-        } else {
-            $query->whereDate('v.fecha_proximo_pago', '=', $fechaSeleccionada);
-        }
-
         $cuentas = $query->orderBy('c.colonia', 'asc')
-                         ->orderBy('v.fecha_proximo_pago', 'asc')
+                         ->orderByRaw("{$fechaCobroV} asc")
                          ->get();
 
-        // Colonias disponibles en la ruta actual para el selector rápido
-        $colonias = $cuentas->pluck('colonia')->filter()->unique()->sort()->values();
-
-        // Contadores para los próximos 7 días (barra superior)
-        $agendaQuery = DB::table('ventas')
-            ->select('fecha_proximo_pago', DB::raw('COUNT(*) as total_cuentas'))
+        // Contador total de atrasados (< hoy) para la pestaña roja
+        $atrasadosQuery = DB::table('ventas')
             ->where('status', 'Pendiente')
             ->where('saldo_restante', '>', 0)
-            ->whereBetween('fecha_proximo_pago', [$hoy, Carbon::parse($hoy)->addDays(6)->format('Y-m-d')]);
+            ->whereRaw("{$fechaCobroSinAlias} IS NOT NULL")
+            ->whereRaw("{$fechaCobroSinAlias} < ?", [$hoy]);
+
+        if ($cobradorId !== 'todos') {
+            $atrasadosQuery->where('cobrador_id', $cobradorId);
+        }
+        $totalAtrasados = $atrasadosQuery->count();
+
+        // Contadores exactos para los próximos 7 días (Hoy + 6 días)
+        $fechaFinSemana = Carbon::parse($hoy)->addDays(6)->format('Y-m-d');
+        $agendaQuery = DB::table('ventas')
+            ->select(DB::raw("{$fechaCobroSinAlias} as fecha_dia"), DB::raw('COUNT(*) as total_cuentas'))
+            ->where('status', 'Pendiente')
+            ->where('saldo_restante', '>', 0)
+            ->whereRaw("{$fechaCobroSinAlias} BETWEEN ? AND ?", [$hoy, $fechaFinSemana]);
 
         if ($cobradorId !== 'todos') {
             $agendaQuery->where('cobrador_id', $cobradorId);
         }
 
-        $agendaSemanal = $agendaQuery->groupBy('fecha_proximo_pago')
-            ->pluck('total_cuentas', 'fecha_proximo_pago');
+        $agendaSemanal = $agendaQuery->groupBy('fecha_dia')
+            ->pluck('total_cuentas', 'fecha_dia');
 
         return view('rutas.index', compact(
             'cuentas',
+            'vista',
+            'totalAtrasados',
             'fechaSeleccionada',
             'agendaSemanal',
             'cobradorId',
             'cobradores',
             'esAdmin',
             'colonias',
-            'coloniaFiltro'
+            'coloniaFiltro',
+            'buscar'
         ));
     }
 
     /**
-     * Reagendar cuenta para otro día (ej. mover visita del domingo al miércoles)
+     * Reagendar cuenta para otro día (sincroniza ambas columnas de fecha)
      */
     public function reagendar(Request $request, string $ventaId)
     {
@@ -184,18 +176,27 @@ class RutaCobroController extends Controller
             return back()->with('error', 'La venta no existe.');
         }
 
-        // Seguridad: un cobrador solo puede reagendar cuentas asignadas a él
         if (!$user->isAdmin() && $venta->cobrador_id !== $user->id) {
             abort(403, 'No tienes permiso para modificar una cuenta que no está en tu ruta.');
         }
 
-        DB::table('ventas')
-            ->where('id', $ventaId)
-            ->update([
-                'fecha_proximo_pago' => $request->nueva_fecha,
-                'nota_cobranza'      => $request->nota_cobranza ?: 'Reagendado para el ' . Carbon::parse($request->nueva_fecha)->format('d/m/Y'),
-                'updated_at'         => now(),
-            ]);
+        $diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        $nuevoDia = $diasSemana[Carbon::parse($request->nueva_fecha)->dayOfWeek];
+
+        $updateData = [
+            'fecha_proximo_pago' => $request->nueva_fecha,
+            'nota_cobranza'      => $request->nota_cobranza ?: 'Reagendado para el ' . Carbon::parse($request->nueva_fecha)->format('d/m/Y'),
+            'updated_at'         => now(),
+        ];
+
+        if (Schema::hasColumn('ventas', 'fecha_final_pago')) {
+            $updateData['fecha_final_pago'] = $request->nueva_fecha;
+        }
+        if (Schema::hasColumn('ventas', 'dia_semana')) {
+            $updateData['dia_semana'] = $nuevoDia;
+        }
+
+        DB::table('ventas')->where('id', $ventaId)->update($updateData);
 
         return back()->with('success', 'Cuenta reagendada para el ' . Carbon::parse($request->nueva_fecha)->format('d/m/Y'));
     }
@@ -223,41 +224,39 @@ class RutaCobroController extends Controller
         return back()->with('success', 'Cobrador reasignado correctamente.');
     }
 
-
     public function asignarRuta(Request $request)
     {
         $request->validate([
-            'nombre' => 'required|string|max:255',
+            'nombre'      => 'required|string|max:255',
             'cobrador_id' => 'required|exists:users,id',
-            'fecha_ruta' => 'required|date',
-            'ventas' => 'required|array|min:1',
+            'fecha_ruta'  => 'required|date',
+            'ventas'      => 'required|array|min:1',
         ]);
 
         DB::beginTransaction();
         try {
             $ruta = Ruta::create([
-                'nombre' => $request->nombre,
+                'nombre'      => $request->nombre,
                 'cobrador_id' => $request->cobrador_id,
-                'fecha_ruta' => $request->fecha_ruta,
-                'status' => 'Pendiente'
+                'fecha_ruta'  => $request->fecha_ruta,
+                'status'      => 'Pendiente'
             ]);
 
             foreach ($request->ventas as $index => $ventaId) {
                 $venta = Venta::find($ventaId);
                 if ($venta) {
                     RutaDetalle::create([
-                        'ruta_id' => $ruta->id,
-                        'venta_id' => $venta->id,
-                        'orden' => $index + 1,
+                        'ruta_id'        => $ruta->id,
+                        'venta_id'       => $venta->id,
+                        'orden'          => $index + 1,
                         'monto_sugerido' => $venta->saldo_restante,
-                        'status' => 'Pendiente'
+                        'status'         => 'Pendiente'
                     ]);
                 }
             }
 
             DB::commit();
             return redirect()->route('rutas.index')->with('success', '¡Ruta creada y asignada exitosamente!');
-
         } catch (\Exception $e) {
             DB::rollBack();
             return redirect()->back()->with('error', 'Error al crear la ruta: ' . $e->getMessage());
@@ -267,17 +266,17 @@ class RutaCobroController extends Controller
     public function update(Request $request, $id)
     {
         $request->validate([
-            'nombre' => 'required|string|max:255',
+            'nombre'      => 'required|string|max:255',
             'cobrador_id' => 'required|exists:users,id',
-            'fecha_ruta' => 'required|date',
+            'fecha_ruta'  => 'required|date',
         ]);
 
         try {
             $ruta = Ruta::findOrFail($id);
             $ruta->update([
-                'nombre' => $request->nombre,
+                'nombre'      => $request->nombre,
                 'cobrador_id' => $request->cobrador_id,
-                'fecha_ruta' => $request->fecha_ruta,
+                'fecha_ruta'  => $request->fecha_ruta,
             ]);
 
             return redirect()->route('rutas.index')->with('success', 'Ruta actualizada correctamente.');
@@ -303,14 +302,15 @@ class RutaCobroController extends Controller
     }
 
     /**
-     * VISTA TABLET / MÓVIL: Carga la ruta dinámica del día (+ atrasadas) para el cobrador
+     * VISTA TABLET / MÓVIL: Carga la ruta dinámica de HOY y ATRASADAS por separado para el cobrador
      */
     public function miRutaCobrador()
     {
         $user = auth()->user();
         $hoy = now()->toDateString();
+        $fechaCobroV = $this->getFechaCobroSql('v');
 
-        $cuentas = DB::table('ventas as v')
+        $baseQuery = DB::table('ventas as v')
             ->select(
                 'v.id as venta_id',
                 'v.folio',
@@ -318,27 +318,38 @@ class RutaCobroController extends Controller
                 'v.saldo_restante',
                 'v.pago_cuota',
                 'v.frecuencia_dias',
-                'v.fecha_proximo_pago',
+                DB::raw("{$fechaCobroV} as fecha_proximo_pago"),
                 'v.nota_cobranza',
                 'c.id as cliente_id',
-                'c.nombre as cliente_nombre',
+                DB::raw("COALESCE(c.nombre, 'SIN CLIENTE ASIGNADO') as cliente_nombre"),
                 'c.telefono',
                 'c.calle',
                 'c.colonia',
                 'c.ubicacion',
                 'c.latitud',
-                'c.longitud'
+                'c.longitud',
+                DB::raw("DATEDIFF('{$hoy}', {$fechaCobroV}) as dias_atraso")
             )
-            ->join('clientes as c', 'v.cliente_id', '=', 'c.id')
+            ->leftJoin('clientes as c', 'v.cliente_id', '=', 'c.id')
             ->where('v.cobrador_id', $user->id)
             ->where('v.status', 'Pendiente')
             ->where('v.saldo_restante', '>', 0)
-            ->whereDate('v.fecha_proximo_pago', '<=', $hoy)
+            ->whereRaw("{$fechaCobroV} IS NOT NULL");
+
+        // 1. Solo cobros programados exactamente para HOY
+        $cuentasHoy = (clone $baseQuery)
+            ->whereRaw("{$fechaCobroV} = ?", [$hoy])
             ->orderBy('c.colonia', 'asc')
-            ->orderBy('v.fecha_proximo_pago', 'asc')
             ->get();
 
-        return view('cobrador.mi_ruta', compact('cuentas', 'hoy'));
+        // 2. Cuentas vencidas de días anteriores (< HOY)
+        $cuentasAtrasadas = (clone $baseQuery)
+            ->whereRaw("{$fechaCobroV} < ?", [$hoy])
+            ->orderBy('c.colonia', 'asc')
+            ->orderByRaw("{$fechaCobroV} asc")
+            ->get();
+
+        return view('cobrador.mi_ruta', compact('cuentasHoy', 'cuentasAtrasadas', 'hoy'));
     }
 
     /**
@@ -375,7 +386,6 @@ class RutaCobroController extends Controller
                 $detalleId     = $item['detalle_id'] ?? null;
                 $gpsCoords     = $item['coordenadas_gps'] ?? null;
 
-                // Formatear correctamente la fecha para MySQL (Y-m-d H:i:s y Y-m-d)
                 $rawFecha       = $item['fecha_local'] ?? $item['fecha'] ?? null;
                 $fechaHoraLocal = $rawFecha ? Carbon::parse($rawFecha)->format('Y-m-d H:i:s') : now()->format('Y-m-d H:i:s');
                 $fechaSoloFecha = $rawFecha ? Carbon::parse($rawFecha)->format('Y-m-d') : now()->format('Y-m-d');
@@ -384,7 +394,6 @@ class RutaCobroController extends Controller
                     continue;
                 }
 
-                // 1. Guardar o actualizar la ubicación GPS del cliente si viene en la petición
                 if (!empty($gpsCoords)) {
                     $ventaObj = Venta::find($ventaId);
                     if ($ventaObj && $ventaObj->cliente_id) {
@@ -394,9 +403,7 @@ class RutaCobroController extends Controller
                     }
                 }
 
-                // 2. Registrar abono en la tabla 'abonos' con campos de la estructura legacy
                 if ($montoAbono > 0 && $statusItem === 'Cobrado') {
-                    // Contar cuántos abonos tiene la venta para asignar el siguiente número de pago (a_npago)
                     $totalAbonosPrevios = DB::table('abonos')
                         ->where('venta_id', $ventaId)
                         ->orWhere('a_venta', $ventaId)
@@ -408,8 +415,8 @@ class RutaCobroController extends Controller
                         'venta_id'      => $ventaId,
                         'a_pago'        => $montoAbono,
                         'a_fecha'       => $fechaHoraLocal,
-                        'a_npago'       => $totalAbonosPrevios + 1, // Nuevo correlativo
-                        'a_cobrador'    => auth()->user()->username ?? 'Cobrador',
+                        'a_npago'       => $totalAbonosPrevios + 1,
+                        'a_cobrador'    => auth()->id(),
                         'a_tipopago'    => 'Efectivo',
                         'a_tipo'        => 'Abono',
                         'a_hora'        => $fechaHoraLocal,
@@ -418,7 +425,6 @@ class RutaCobroController extends Controller
                         'updated_at'    => now(),
                     ]);
 
-                    // Descontar el saldo restante en la venta
                     $venta = Venta::find($ventaId);
                     if ($venta) {
                         $venta->saldo_restante = max(0, $venta->saldo_restante - $montoAbono);
@@ -427,13 +433,16 @@ class RutaCobroController extends Controller
                             $venta->fecha_proximo_pago = null;
                         } else {
                             $dias = max(1, (int) ($venta->frecuencia_dias ?? 7));
-                            $venta->fecha_proximo_pago = Carbon::parse($fechaSoloFecha)->addDays($dias)->format('Y-m-d');
+                            $nuevaFecha = Carbon::parse($fechaSoloFecha)->addDays($dias)->format('Y-m-d');
+                            $venta->fecha_proximo_pago = $nuevaFecha;
+                            if (Schema::hasColumn('ventas', 'fecha_final_pago')) {
+                                $venta->fecha_final_pago = $nuevaFecha;
+                            }
                         }
                         $venta->save();
                     }
                 }
 
-                // 3. Actualizar la tabla 'ruta_detalles'
                 if (!empty($detalleId)) {
                     $detalle = RutaDetalle::find($detalleId);
                     if ($detalle) {
@@ -457,7 +466,6 @@ class RutaCobroController extends Controller
                 $procesados[] = $detalleId ?? $ventaId;
             }
 
-            // 4. Evaluar si las rutas involucradas ya no tienen visitas pendientes para marcarlas como 'Completada'
             foreach (array_keys($rutasAfectadas) as $rutaId) {
                 $pendientes = RutaDetalle::where('ruta_id', $rutaId)
                     ->where('status', 'Pendiente')
@@ -486,5 +494,56 @@ class RutaCobroController extends Controller
                 'message' => 'Error al guardar los abonos: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Reagendar múltiples cuentas atrasadas de un solo golpe (o pasarlas a Cartera Vencida)
+     */
+    public function reagendarMasivo(Request $request)
+    {
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Solo el administrador puede reorganizar cuentas de forma masiva.');
+        }
+
+        $request->validate([
+            'venta_ids'     => 'required|array|min:1',
+            'accion'        => 'required|in:reagendar,cartera_vencida',
+            'nueva_fecha'   => 'required_if:accion,reagendar|nullable|date|after_or_equal:today',
+            'nota_cobranza' => 'nullable|string|max:255',
+        ]);
+
+        $ids = $request->venta_ids;
+
+        if ($request->accion === 'cartera_vencida') {
+            DB::table('ventas')
+                ->whereIn('id', $ids)
+                ->update([
+                    'status'        => 'Vencido',
+                    'nota_cobranza' => $request->nota_cobranza ?: 'Movido a cartera vencida el ' . now()->format('d/m/Y'),
+                    'updated_at'    => now(),
+                ]);
+
+            return back()->with('success', count($ids) . ' cuentas movidas a Cartera Vencida (fuera de ruta diaria).');
+        }
+
+        $diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        $nuevoDia = $diasSemana[Carbon::parse($request->nueva_fecha)->dayOfWeek];
+
+        $updateData = [
+            'fecha_proximo_pago' => $request->nueva_fecha,
+            'nota_cobranza'      => $request->nota_cobranza ?: 'Reagendado masivamente para el ' . Carbon::parse($request->nueva_fecha)->format('d/m/Y'),
+            'updated_at'         => now(),
+        ];
+
+        if (Schema::hasColumn('ventas', 'fecha_final_pago')) {
+            $updateData['fecha_final_pago'] = $request->nueva_fecha;
+        }
+        if (Schema::hasColumn('ventas', 'dia_semana')) {
+            $updateData['dia_semana'] = $nuevoDia;
+        }
+
+        DB::table('ventas')->whereIn('id', $ids)->update($updateData);
+
+        return back()->with('success', count($ids) . ' cuentas reagendadas para el ' . Carbon::parse($request->nueva_fecha)->format('d/m/Y') . '.');
     }
 }

@@ -4,7 +4,7 @@
 
 @section('content')
 
-@php
+    @php
         $puedeVerTodos = auth()->user()->tienePermiso('cierres.all');
         $colClass = $puedeVerTodos ? 'col-md-4' : 'col-md-6';
     @endphp
@@ -52,21 +52,21 @@
                         </p>
                     </div>
 
-                    <form action="{{ route('cierres.pdf') }}" method="GET" target="_blank" class="w-100 form-reporte-cierre">
+                    <div class="w-100" id="bloqueCierreFechas">
                         <div class="row g-2 mb-3">
                             <div class="col-6">
                                 <label class="form-label small text-muted text-uppercase fw-bold d-block text-start mb-1">Desde</label>
-                                <input type="date" name="fecha1" class="form-control" value="{{ date('Y-m-d') }}" required>
+                                <input type="date" id="fechas_fecha1" class="form-control" value="{{ date('Y-m-d') }}" required>
                             </div>
                             <div class="col-6">
                                 <label class="form-label small text-muted text-uppercase fw-bold d-block text-start mb-1">Hasta</label>
-                                <input type="date" name="fecha2" class="form-control" value="{{ date('Y-m-d') }}" required>
+                                <input type="date" id="fechas_fecha2" class="form-control" value="{{ date('Y-m-d') }}" required>
                             </div>
                         </div>
-                        <button type="submit" class="btn btn-warning text-white rounded-3 w-100 py-2 fw-bold shadow-sm">
+                        <button type="button" onclick="abrirReporteFechas()" class="btn btn-warning text-white rounded-3 w-100 py-2 fw-bold shadow-sm">
                             <i class="bi bi-search me-1"></i> Generar Reporte
                         </button>
-                    </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -84,9 +84,9 @@
                             <p class="text-muted small mb-3">Filtrar cobros realizados por un cobrador específico.</p>
                         </div>
 
-                        <form action="{{ route('cierres.pdf') }}" method="GET" target="_blank" class="w-100 form-reporte-cierre">
+                        <div class="w-100" id="bloqueCierreUsuario">
                             <div class="mb-2">
-                                <select name="cobrador_id" class="form-select" required>
+                                <select id="usuario_cobrador_id" class="form-select">
                                     <option value="" selected>Seleccione Cobrador...</option>
                                     @foreach($cobradores as $cob)
                                         <option value="{{ $cob->id }}">{{ $cob->username }}</option>
@@ -95,20 +95,117 @@
                             </div>
                             <div class="row g-2 mb-3">
                                 <div class="col-6">
-                                    <input type="date" name="fecha1" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
+                                    <input type="date" id="usuario_fecha1" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
                                 </div>
                                 <div class="col-6">
-                                    <input type="date" name="fecha2" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
+                                    <input type="date" id="usuario_fecha2" class="form-control form-control-sm" value="{{ date('Y-m-d') }}">
                                 </div>
                             </div>
-                            <button type="submit" class="btn btn-info text-white rounded-3 w-100 py-2 fw-bold shadow-sm">
+                            <button type="button" onclick="abrirReporteUsuario()" class="btn btn-info text-white rounded-3 w-100 py-2 fw-bold shadow-sm">
                                 <i class="bi bi-person-check me-1"></i> Filtrar Usuario
                             </button>
-                        </form>
+                        </div>
                     </div>
                 </div>
             </div>
         @endif
 
     </div>
+
+    <!-- 4. NUEVO APARTADO: CIERRE EJECUTIVO -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+        <div class="card-body p-4">
+            <div class="row align-items-center g-4">
+                <div class="col-lg-5 d-flex align-items-start gap-3">
+                    <div class="bg-dark text-white p-3 rounded-4 d-inline-flex align-items-center justify-content-center flex-shrink-0">
+                        <i class="bi bi-bar-chart-line-fill fs-2"></i>
+                    </div>
+                    <div>
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <h5 class="fw-bold text-dark mb-0">Cierre Ejecutivo</h5>
+                            <span class="badge bg-success bg-opacity-10 text-success border border-success rounded-pill">Detallado</span>
+                        </div>
+                        <p class="text-muted small mb-0">
+                            Reporte gerencial con indicadores de efectividad, desglose por usuario (cobrado vs. pendiente de pago), métodos de pago (efectivo, transferencia, tarjeta) y arqueo consolidado.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="col-lg-7">
+                    <div class="row g-2 align-items-end">
+                        <div class="{{ $puedeVerTodos ? 'col-6 col-md-3' : 'col-6 col-md-4' }}">
+                            <label class="form-label small text-muted text-uppercase fw-bold mb-1">Desde</label>
+                            <input type="date" id="ejec_fecha1" class="form-control" value="{{ date('Y-m-d') }}">
+                        </div>
+
+                        <div class="{{ $puedeVerTodos ? 'col-6 col-md-3' : 'col-6 col-md-4' }}">
+                            <label class="form-label small text-muted text-uppercase fw-bold mb-1">Hasta</label>
+                            <input type="date" id="ejec_fecha2" class="form-control" value="{{ date('Y-m-d') }}">
+                        </div>
+
+                        @if($puedeVerTodos)
+                            <div class="col-12 col-md-3">
+                                <label class="form-label small text-muted text-uppercase fw-bold mb-1">Usuario</label>
+                                <select id="ejec_cobrador_id" class="form-select">
+                                    <option value="">Todos los usuarios</option>
+                                    @foreach($cobradores as $cob)
+                                        <option value="{{ $cob->id }}">{{ $cob->username }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        @endif
+
+                        <div class="{{ $puedeVerTodos ? 'col-12 col-md-3' : 'col-12 col-md-4' }}">
+                            <button type="button" onclick="abrirReporteEjecutivo()" class="btn btn-dark rounded-3 w-100 py-2 fw-bold shadow-sm">
+                                <i class="bi bi-file-earmark-bar-graph me-1"></i> Generar Ejecutivo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function abrirReporteFechas() {
+            const f1 = document.getElementById('fechas_fecha1').value;
+            const f2 = document.getElementById('fechas_fecha2').value;
+            if (!f1 || !f2) {
+                alert('Selecciona ambas fechas para generar el reporte.');
+                return;
+            }
+            const url = `{{ route('cierres.pdf') }}?fecha1=${encodeURIComponent(f1)}&fecha2=${encodeURIComponent(f2)}`;
+            window.open(url, '_blank');
+        }
+
+        function abrirReporteUsuario() {
+            const cobradorId = document.getElementById('usuario_cobrador_id').value;
+            const f1 = document.getElementById('usuario_fecha1').value;
+            const f2 = document.getElementById('usuario_fecha2').value;
+            if (!cobradorId) {
+                alert('Por favor selecciona un cobrador de la lista.');
+                document.getElementById('usuario_cobrador_id').focus();
+                return;
+            }
+            const url = `{{ route('cierres.pdf') }}?cobrador_id=${encodeURIComponent(cobradorId)}&fecha1=${encodeURIComponent(f1)}&fecha2=${encodeURIComponent(f2)}`;
+            window.open(url, '_blank');
+        }
+
+        function abrirReporteEjecutivo() {
+            const f1 = document.getElementById('ejec_fecha1').value;
+            const f2 = document.getElementById('ejec_fecha2').value;
+            const selectCob = document.getElementById('ejec_cobrador_id');
+            const cobradorId = selectCob ? selectCob.value : '';
+            if (!f1 || !f2) {
+                alert('Selecciona ambas fechas para generar el reporte ejecutivo.');
+                return;
+            }
+            let url = `{{ route('cierres.ejecutivo') }}?fecha1=${encodeURIComponent(f1)}&fecha2=${encodeURIComponent(f2)}`;
+            if (cobradorId) {
+                url += `&cobrador_id=${encodeURIComponent(cobradorId)}`;
+            }
+            window.open(url, '_blank');
+        }
+    </script>
+
 @endsection
