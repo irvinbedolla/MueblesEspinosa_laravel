@@ -65,17 +65,17 @@
 
         <!-- PRECIOS Y ALERTA STOCK -->
         <div class="card border-0 shadow-sm rounded-4 bg-white mb-4 p-4 p-md-5">
-            <h5 class="fw-bold text-dark mb-4"><i class="bi bi-currency-dollar text-success me-2"></i>Costos y Configuración de Stock</h5>
+            <h5 class="fw-bold text-dark mb-4"><i class="bi bi-currency-dollar text-success me-2"></i>Precios y Configuración de Stock</h5>
 
             <div class="row g-4 mb-4">
                 <div class="col-md-4">
-                    <label class="form-label fw-semibold text-secondary small">Precio Compra ($) (*)</label>
-                    <input type="number" step="0.01" id="pcompra" name="pcompra" class="form-control bg-light rounded-3 fw-bold" value="{{ old('pcompra', $articulo->pcompra) }}" required oninput="recalcularPrecios()">
+                    <label class="form-label fw-semibold text-secondary small">Precio Crédito ($) (*)</label>
+                    <input type="number" step="0.01" id="pcompra" name="pcompra" class="form-control bg-light rounded-3 fw-bold text-primary" value="{{ old('pcompra', $articulo->pcompra) }}" required oninput="recalcularPrecios()">
                 </div>
 
                 <div class="col-md-4">
                     <label class="form-label fw-semibold text-secondary small">Precio Contado ($) (*)</label>
-                    <input type="number" step="0.01" name="pcontado" class="form-control bg-light rounded-3 fw-bold text-success" value="{{ old('pcontado', $articulo->pcontado) }}" required>
+                    <input type="number" step="0.01" id="pcontado" name="pcontado" class="form-control bg-light rounded-3 fw-bold text-success" value="{{ old('pcontado', $articulo->pcontado) }}" required>
                 </div>
 
                 <div class="col-md-4">
@@ -92,8 +92,8 @@
                     <div class="col-6 col-md-3">
                         <div class="p-3 border rounded-3 bg-light">
                             <small class="fw-bold text-primary d-block mb-1">{{ $precio->meses }} Mes(es)</small>
-                            <input type="number" step="0.01" id="precio_mes_{{ $precio->meses }}" name="precios_custom[{{ $precio->meses }}]" class="form-control form-control-sm rounded-2 bg-white fw-semibold" value="{{ $precio->precio_total }}">
-                            <small class="text-muted extra-small d-block mt-1" id="pago_mes_{{ $precio->meses }}">Mensual: ${{ number_format($precio->pago_mensual, 2) }}</small>
+                            <input type="number" step="0.01" id="precio_mes_{{ $precio->meses }}" name="precios_custom[{{ $precio->meses }}]" class="form-control form-control-sm rounded-2 bg-white fw-semibold" value="{{ $precio->precio_total }}" oninput="actualizarEtiquetaTotal({{ $precio->meses }})">
+                            <small class="text-muted extra-small d-block mt-1" id="pago_mes_{{ $precio->meses }}">Total: ${{ number_format($precio->precio_total, 2) }}</small>
                         </div>
                     </div>
                 @endforeach
@@ -110,26 +110,48 @@
 </div>
 
 <script>
-function recalcularPrecios() {
-    const pcompra = parseFloat(document.getElementById('pcompra').value) || 0;
+function actualizarEtiquetaTotal(m) {
+    const inputMes = document.getElementById(`precio_mes_${m}`);
+    const labelTotal = document.getElementById(`pago_mes_${m}`);
+    if (inputMes && labelTotal) {
+        const val = parseFloat(inputMes.value) || 0;
+        labelTotal.innerText = `Total: $${val.toFixed(2)}`;
+    }
+}
 
-    const utilidades = { 
+function recalcularPrecios() {
+    const precioCredito = parseFloat(document.getElementById('pcompra').value) || 0;
+
+    // Porcentajes de descuento aplicados sobre el Precio Crédito
+    const descuentos = { 
         1: 40, 2: 35, 3: 30, 4: 25, 
         5: 20, 6: 15, 7: 10, 8: 5, 
         9: 0, 10: 0, 11: 0, 12: 0 
     };
 
+    let precioMes1 = 0;
+
     for (let m = 1; m <= 12; m++) {
         const inputMes = document.getElementById(`precio_mes_${m}`);
         if (inputMes) {
-            const pct = utilidades[m] || 0;
-            const montoUtilidad = pcompra * (pct / 100);
-            const total = Math.round((pcompra + montoUtilidad) * 100) / 100;
-            const mensual = Math.round((total / m) * 100) / 100;
+            const pctDesc = descuentos[m] || 0;
+            const montoDescuento = precioCredito * (pctDesc / 100);
+            const total = Math.round((precioCredito - montoDescuento) * 100) / 100;
+
+            if (m === 1) {
+                precioMes1 = total;
+            }
 
             inputMes.value = total.toFixed(2);
-            document.getElementById(`pago_mes_${m}`).innerText = `Mensual: $${mensual.toFixed(2)}`;
+            document.getElementById(`pago_mes_${m}`).innerText = `Total: $${total.toFixed(2)}`;
         }
+    }
+
+    // Precio Contado = Precio del 1er Mes menos el 5%
+    const inputContado = document.getElementById('pcontado');
+    if (inputContado) {
+        const precioContado = Math.round((precioMes1 * 0.95) * 100) / 100;
+        inputContado.value = precioContado.toFixed(2);
     }
 }
 </script>

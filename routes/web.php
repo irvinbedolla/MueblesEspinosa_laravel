@@ -146,6 +146,6 @@ Route::middleware(['auth'])->group(function () {
     // Editar y actualizar ventas Pendientes
     Route::get('/ventas/{id}/editar', [VentaController::class, 'edit'])->name('ventas.edit');
     Route::put('/ventas/{id}', [VentaController::class, 'update'])->name('ventas.update');
-    
+    Route::get('/ventas/clientes/buscar', [VentaController::class, 'buscarClientesAjax'])->name('ventas.clientes.buscar');
     
 });

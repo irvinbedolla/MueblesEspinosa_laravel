@@ -32,7 +32,13 @@ class VentaController extends Controller
         $ultimoFolio = Venta::max('folio') ?? 1000;
         $nuevoFolio = $ultimoFolio + 1;
 
-        $clientes = Cliente::where('status', 'Activo')->orderBy('nombre')->get();
+        //$clientes = Cliente::where('status', 'Activo')->orderBy('nombre')->get();
+        $clientes = DB::table('clientes')
+        ->select('id', 'nombre', 'telefono', 'calle', 'colonia', 'ciudad')
+        ->where('status', 'Activo')
+        ->orderBy('nombre')
+        ->limit(30)
+        ->get();
         $cobradores = User::where('is_active', true)->orderBy('username')->get();
         $vendedores = User::where('is_active', true)->orderBy('username')->get();
 
@@ -490,7 +496,7 @@ class VentaController extends Controller
     /**
      * Procesa el cambio de estatus de una venta y gestiona inventario/kardex/condición
      */
-    public function cambiarEstatusStatus(Request $request, $id)
+public function cambiarEstatusStatus(Request $request, $id)
     {
         $request->validate([
             'nuevo_estatus' => 'required|string',
@@ -624,9 +630,37 @@ class VentaController extends Controller
                             break;
                         }
 
-                        if ((float)$venta->saldo_restante <= 0) {
-                            throw new \Exception("No se puede pasar a Pendiente una venta con Saldo Pendiente de $0.00.");
+                        // Calcular la suma real de abonos registrados para esta venta
+                        $sumaAbonos = (float) DB::table('abonos')
+                            ->where(function ($q) use ($venta) {
+                                $q->where('venta_id', (string) $venta->id)
+                                  ->orWhere('a_venta', (string) $venta->id)
+                                  ->orWhere('a_venta', (string) $venta->folio);
+                            })
+                            ->sum('a_pago');
+
+                        // Respaldo para ventas migradas que tengan anticipo sin registro en tabla abonos
+                        if ($sumaAbonos == 0 && (float) ($venta->anticipo ?? 0) > 0) {
+                            $sumaAbonos = (float) $venta->anticipo;
                         }
+
+                        $totalVenta = (float) $venta->total;
+
+                        if ($sumaAbonos > $totalVenta) {
+                            throw new \Exception(
+                                "No se puede pasar a Pendiente: la suma de abonos ($" . number_format($sumaAbonos, 2) . ") es mayor al total de la venta ($" . number_format($totalVenta, 2) . ")."
+                            );
+                        }
+
+                        $nuevoRestante = round($totalVenta - $sumaAbonos, 2);
+                        /*
+                        if ($nuevoRestante <= 0) {
+                            throw new \Exception(
+                                "No se puede pasar a Pendiente porque la venta ya está liquidada (Total: $" . number_format($totalVenta, 2) . ", Abonos: $" . number_format($sumaAbonos, 2) . ")."
+                            );
+                        }
+                        */
+                        $venta->saldo_restante = $nuevoRestante;
 
                         $estatusConStockDevuelto = ['Devolucion', 'Recogido', 'Eliminar', 'Descompuesto'];
 
@@ -1337,5 +1371,27 @@ class VentaController extends Controller
                 'message' => 'Ocurrió un error al actualizar la venta: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    public function buscarClientesAjax(Request $request)
+    {
+        $q = trim((string) $request->input('q', ''));
+
+        $clientes = DB::table('clientes')
+            ->select('id', 'nombre', 'telefono', 'calle', 'colonia', 'ciudad')
+            ->where('status', 'Activo')
+            ->when($q !== '', function ($query) use ($q) {
+                $query->where(function ($sub) use ($q) {
+                    $sub->where('nombre', 'like', "%{$q}%")
+                        ->orWhere('telefono', 'like', "%{$q}%")
+                        ->orWhere('colonia', 'like', "%{$q}%")
+                        ->orWhere('ciudad', 'like', "%{$q}%");
+                });
+            })
+            ->orderBy('nombre')
+            ->limit(25)
+            ->get();
+
+        return response()->json($clientes);
     }
 }

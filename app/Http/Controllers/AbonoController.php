@@ -150,26 +150,45 @@ class AbonoController extends Controller
             'telefono' => $clienteDB->telefono ?? ''
         ];
 
-        // 2. Historial de abonos
-        $historialAbonos = DB::table('abonos as a')
-            ->select(
-                'a.*',
-                DB::raw("COALESCE(u.username, a.a_cobrador, 'Cobrador') as nombre_cobrador")
-            )
-            ->leftJoin('users as u', function($join) {
-                $join->on('a.a_cobrador', '=', 'u.id')
-                    ->orOn('a.a_cobrador', '=', 'u.user_id_legacy')
-                    ->orOn('a.a_cobrador', '=', 'u.username');
-            })
-            ->where(function($q) use ($venta) {
-                $q->where('a.venta_id', $venta->id);
-                if (!empty($venta->venta_id_legacy)) {
-                    $q->orWhere('a.a_venta', $venta->venta_id_legacy);
+        // 2. Historial de abonos (sin JOIN a users para evitar duplicados por coerción de tipos)
+        $historialRaw = DB::table('abonos as a')
+            ->where(function ($q) use ($venta) {
+                $q->where('a.venta_id', (string) $venta->id);
+                if (!empty($venta->venta_id_legacy) && (int) $venta->venta_id_legacy > 0) {
+                    $q->orWhere('a.a_venta', (string) $venta->venta_id_legacy);
                 }
-                $q->orWhere('a.a_venta', $venta->id);
+                if (!empty($venta->folio) && (int) $venta->folio > 0) {
+                    $q->orWhere('a.a_venta', (string) $venta->folio);
+                }
+                $q->orWhere('a.a_venta', (string) $venta->id);
             })
+            ->orderBy('a.a_npago', 'asc')
+            ->orderBy('a.a_fecha', 'asc')
             ->orderBy('a.created_at', 'asc')
             ->get();
+
+        // Mapear nombres de cobradores en memoria sin duplicar filas
+        $usuariosAll = DB::table('users')->select('id', 'user_id_legacy', 'username')->get();
+        $mapPorId       = $usuariosAll->keyBy(fn($u) => (string) $u->id);
+        $mapPorLegacy   = $usuariosAll->filter(fn($u) => !empty($u->user_id_legacy))->keyBy(fn($u) => (string) $u->user_id_legacy);
+        $mapPorUsername = $usuariosAll->keyBy(fn($u) => mb_strtolower(trim((string) $u->username)));
+
+        $historialAbonos = $historialRaw->map(function ($ab) use ($mapPorId, $mapPorLegacy, $mapPorUsername) {
+            $key = trim((string) ($ab->a_cobrador ?? ''));
+            $keyLower = mb_strtolower($key);
+
+            if ($key !== '' && isset($mapPorId[$key])) {
+                $ab->nombre_cobrador = $mapPorId[$key]->username;
+            } elseif ($key !== '' && ctype_digit($key) && isset($mapPorLegacy[$key])) {
+                $ab->nombre_cobrador = $mapPorLegacy[$key]->username;
+            } elseif ($keyLower !== '' && isset($mapPorUsername[$keyLower])) {
+                $ab->nombre_cobrador = $mapPorUsername[$keyLower]->username;
+            } else {
+                $ab->nombre_cobrador = $key !== '' ? $key : 'Cobrador';
+            }
+
+            return $ab;
+        });
 
         $suma = $historialAbonos->sum('a_pago') ?? 0;
         $ultimoAbono = $historialAbonos->last();
@@ -603,25 +622,45 @@ public function store(Request $request)
      */
     public function reagendarVisita(Request $request)
     {
+        // Aceptar 'nueva_fecha' (o 'proximo_pago' como respaldo)
+        $fechaInput = $request->input('nueva_fecha') ?? $request->input('proximo_pago');
+        $request->merge(['nueva_fecha' => $fechaInput]);
+
         $request->validate([
             'venta_id'    => 'required',
             'nueva_fecha' => 'required|date',
         ]);
 
         $ventaId    = $request->input('venta_id');
-        $nuevaFecha = $request->input('nueva_fecha');
+        $nuevaFecha = Carbon::parse($request->input('nueva_fecha'))->format('Y-m-d');
 
         $diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        $nuevoDia   = $diasSemana[\Carbon\Carbon::parse($nuevaFecha)->dayOfWeek];
+        $nuevoDia   = $diasSemana[Carbon::parse($nuevaFecha)->dayOfWeek];
 
         $updateData = [
-            'fecha_proximo_pago' => $nuevaFecha,
-            'dia_semana'         => $nuevoDia,
-            'updated_at'         => now(),
+            'updated_at' => now(),
         ];
 
-        if (\Illuminate\Support\Facades\Schema::hasColumn('ventas', 'fecha_final_pago')) {
+        if (Schema::hasColumn('ventas', 'fecha_proximo_pago')) {
+            $updateData['fecha_proximo_pago'] = $nuevaFecha;
+        }
+        if (Schema::hasColumn('ventas', 'fecha_final_pago')) {
             $updateData['fecha_final_pago'] = $nuevaFecha;
+        }
+        if (Schema::hasColumn('ventas', 'proximo_pago')) {
+            $updateData['proximo_pago'] = $nuevaFecha;
+        }
+        if (Schema::hasColumn('ventas', 'fecha_siguiente_pago')) {
+            $updateData['fecha_siguiente_pago'] = $nuevaFecha;
+        }
+        if (Schema::hasColumn('ventas', 'venta_pagof')) {
+            $updateData['venta_pagof'] = $nuevaFecha;
+        }
+        if (Schema::hasColumn('ventas', 'dia_semana')) {
+            $updateData['dia_semana'] = $nuevoDia;
+        }
+        if (Schema::hasColumn('ventas', 'dia_cobro')) {
+            $updateData['dia_cobro'] = $nuevoDia;
         }
 
         // Evita colisión UUID vs INT en venta_id_legacy
@@ -632,7 +671,7 @@ public function store(Request $request)
 
         $query->update($updateData);
 
-        return back()->with('success', 'Visita reagendada correctamente para el ' . \Carbon\Carbon::parse($nuevaFecha)->format('d/m/Y'));
+        return back()->with('success', 'Visita reagendada correctamente para el ' . Carbon::parse($nuevaFecha)->format('d/m/Y'));
     }
 
     /**

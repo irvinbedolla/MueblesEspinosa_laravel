@@ -353,7 +353,7 @@ class RutaCobroController extends Controller
     }
 
     /**
-     * ENDPOINT DE SINCRONIZACIÓN
+     * ENDPOINT DE SINCRONIZACIÓN CON BANDERA ANTI-DUPLICADOS
      */
     public function sincronizarAbonosOffline(Request $request)
     {
@@ -369,41 +369,82 @@ class RutaCobroController extends Controller
                     'status'     => 'success',
                     'success'    => true,
                     'message'    => 'No hay cobros pendientes por sincronizar.',
-                    'procesados' => []
+                    'procesados' => [],
+                    'duplicados' => 0
                 ], 200);
             }
 
             DB::beginTransaction();
 
             $procesados = [];
+            $duplicadosOmitidos = 0;
             $rutasAfectadas = [];
+            $cobradorId = auth()->id();
 
             foreach ($cobros as $item) {
                 $ventaId       = $item['venta_id'] ?? $item['a_venta'] ?? null;
-                $montoAbono    = (float)($item['monto'] ?? $item['a_pago'] ?? 0);
-                $observaciones = $item['observaciones'] ?? 'Abono en ruta (Offline)';
+                $montoAbono    = round((float)($item['monto'] ?? $item['a_pago'] ?? 0), 2);
+                $observaciones = trim((string)($item['observaciones'] ?? 'Abono en ruta (Offline)'));
                 $statusItem    = $item['status'] ?? 'Cobrado';
                 $detalleId     = $item['detalle_id'] ?? null;
                 $gpsCoords     = $item['coordenadas_gps'] ?? null;
+                $offlineUuid   = trim((string)($item['offline_uuid'] ?? $item['uuid'] ?? ''));
 
                 $rawFecha       = $item['fecha_local'] ?? $item['fecha'] ?? null;
-                $fechaHoraLocal = $rawFecha ? Carbon::parse($rawFecha)->format('Y-m-d H:i:s') : now()->format('Y-m-d H:i:s');
-                $fechaSoloFecha = $rawFecha ? Carbon::parse($rawFecha)->format('Y-m-d') : now()->format('Y-m-d');
+                $fechaCarbon    = $rawFecha ? Carbon::parse($rawFecha) : now();
+                $fechaHoraLocal = $fechaCarbon->format('Y-m-d H:i:s');
+                $fechaSoloFecha = $fechaCarbon->format('Y-m-d');
 
                 if (empty($ventaId)) {
                     continue;
                 }
 
-                if (!empty($gpsCoords)) {
-                    $ventaObj = Venta::find($ventaId);
-                    if ($ventaObj && $ventaObj->cliente_id) {
-                        Cliente::where('id', $ventaObj->cliente_id)->update([
-                            'cliente_ubicacion' => $gpsCoords
-                        ]);
-                    }
+                // Bloquear fila de venta durante la transacción para evitar doble procesamiento
+                $venta = Venta::where('id', $ventaId)->lockForUpdate()->first();
+                if (!$venta) {
+                    continue;
+                }
+
+                if (!empty($gpsCoords) && $venta->cliente_id) {
+                    Cliente::where('id', $venta->cliente_id)->update([
+                        'cliente_ubicacion' => $gpsCoords
+                    ]);
                 }
 
                 if ($montoAbono > 0 && $statusItem === 'Cobrado') {
+                    // BANDERA ANTI-DUPLICADOS:
+                    // Evita registrar dos veces un abono idéntico (misma venta, cobrador y monto)
+                    // dentro de una ventana de +-10 minutos o con el mismo offline_uuid.
+                    $ventanaInicio = (clone $fechaCarbon)->subMinutes(10)->format('Y-m-d H:i:s');
+                    $ventanaFin    = (clone $fechaCarbon)->addMinutes(10)->format('Y-m-d H:i:s');
+
+                    $yaExisteAbono = DB::table('abonos')
+                        ->where(function ($q) use ($ventaId) {
+                            $q->where('venta_id', $ventaId)
+                              ->orWhere('a_venta', $ventaId);
+                        })
+                        ->where('a_cobrador', $cobradorId)
+                        ->where('a_pago', $montoAbono)
+                        ->where(function ($q) use ($offlineUuid, $ventanaInicio, $ventanaFin) {
+                            if ($offlineUuid !== '') {
+                                $q->where('observaciones', 'like', "%[REF:{$offlineUuid}]%")
+                                  ->orWhereBetween('a_fecha', [$ventanaInicio, $ventanaFin]);
+                            } else {
+                                $q->whereBetween('a_fecha', [$ventanaInicio, $ventanaFin]);
+                            }
+                        })
+                        ->exists();
+
+                    if ($yaExisteAbono || (float)$venta->saldo_restante <= 0) {
+                        $duplicadosOmitidos++;
+                        $procesados[] = $detalleId ?? $ventaId;
+                        continue;
+                    }
+
+                    $obsFinal = $offlineUuid !== ''
+                        ? "{$observaciones} [REF:{$offlineUuid}]"
+                        : $observaciones;
+
                     $totalAbonosPrevios = DB::table('abonos')
                         ->where('venta_id', $ventaId)
                         ->orWhere('a_venta', $ventaId)
@@ -416,31 +457,28 @@ class RutaCobroController extends Controller
                         'a_pago'        => $montoAbono,
                         'a_fecha'       => $fechaHoraLocal,
                         'a_npago'       => $totalAbonosPrevios + 1,
-                        'a_cobrador'    => auth()->id(),
+                        'a_cobrador'    => $cobradorId,
                         'a_tipopago'    => 'Efectivo',
                         'a_tipo'        => 'Abono',
                         'a_hora'        => $fechaHoraLocal,
-                        'observaciones' => $observaciones,
+                        'observaciones' => $obsFinal,
                         'created_at'    => $fechaHoraLocal,
                         'updated_at'    => now(),
                     ]);
 
-                    $venta = Venta::find($ventaId);
-                    if ($venta) {
-                        $venta->saldo_restante = max(0, $venta->saldo_restante - $montoAbono);
-                        if ($venta->saldo_restante == 0) {
-                            $venta->status = 'Pagado';
-                            $venta->fecha_proximo_pago = null;
-                        } else {
-                            $dias = max(1, (int) ($venta->frecuencia_dias ?? 7));
-                            $nuevaFecha = Carbon::parse($fechaSoloFecha)->addDays($dias)->format('Y-m-d');
-                            $venta->fecha_proximo_pago = $nuevaFecha;
-                            if (Schema::hasColumn('ventas', 'fecha_final_pago')) {
-                                $venta->fecha_final_pago = $nuevaFecha;
-                            }
+                    $venta->saldo_restante = max(0, (float)$venta->saldo_restante - $montoAbono);
+                    if ($venta->saldo_restante == 0) {
+                        $venta->status = 'Pagado';
+                        $venta->fecha_proximo_pago = null;
+                    } else {
+                        $dias = max(1, (int) ($venta->frecuencia_dias ?? 7));
+                        $nuevaFecha = Carbon::parse($fechaSoloFecha)->addDays($dias)->format('Y-m-d');
+                        $venta->fecha_proximo_pago = $nuevaFecha;
+                        if (Schema::hasColumn('ventas', 'fecha_final_pago')) {
+                            $venta->fecha_final_pago = $nuevaFecha;
                         }
-                        $venta->save();
                     }
+                    $venta->save();
                 }
 
                 if (!empty($detalleId)) {
@@ -478,11 +516,17 @@ class RutaCobroController extends Controller
 
             DB::commit();
 
+            $mensaje = 'Sincronización completada exitosamente.';
+            if ($duplicadosOmitidos > 0) {
+                $mensaje .= " ({$duplicadosOmitidos} abono(s) duplicado(s) fueron bloqueados automáticamente).";
+            }
+
             return response()->json([
                 'status'     => 'success',
                 'success'    => true,
-                'message'    => 'Sincronización completada exitosamente.',
-                'procesados' => $procesados
+                'message'    => $mensaje,
+                'procesados' => $procesados,
+                'duplicados' => $duplicadosOmitidos
             ], 200);
 
         } catch (\Exception $e) {

@@ -387,7 +387,7 @@
                 <input type="hidden" name="venta_id" value="{{ $venta->id }}">
                 <div class="modal-body p-4">
                     <label class="form-label small fw-bold text-muted text-uppercase mb-2">Nueva Fecha de Visita</label>
-                    <input type="date" name="proximo_pago" class="form-control form-control-lg rounded-3" value="{{ $venta->proximo_pago ?? date('Y-m-d') }}" required>
+                    <input type="date" name="nueva_fecha" class="form-control form-control-lg rounded-3" value="{{ !empty($proximoPago) ? \Carbon\Carbon::parse($proximoPago)->format('Y-m-d') : date('Y-m-d') }}" required>
                 </div>
                 <div class="modal-footer border-0 pt-0 pe-4 pb-4">
                     <button type="submit" class="btn btn-warning text-white rounded-3 px-4 fw-bold shadow-sm w-100 py-2">

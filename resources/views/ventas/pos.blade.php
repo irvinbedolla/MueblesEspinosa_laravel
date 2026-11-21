@@ -782,12 +782,45 @@
         }, 200);
     }
 
+    let timerBuscarClientePos = null;
+
     function filtrarClientesModal() {
-        const q = document.getElementById('input_buscar_cliente').value.toLowerCase().trim();
-        document.querySelectorAll('.item-cliente-modal').forEach(f => {
-            const match = f.getAttribute('data-nombre').includes(q) || f.getAttribute('data-ciudad').includes(q) || f.getAttribute('data-colonia').includes(q) || f.getAttribute('data-tel').includes(q);
-            f.style.display = match ? '' : 'none';
-        });
+        clearTimeout(timerBuscarClientePos);
+        const q = document.getElementById('input_buscar_cliente').value.trim();
+
+        timerBuscarClientePos = setTimeout(() => {
+            fetch(`{{ route('ventas.clientes.buscar') }}?q=${encodeURIComponent(q)}`, {
+                headers: { 'Accept': 'application/json' }
+            })
+            .then(res => res.json())
+            .then(clientes => {
+                const tbody = document.getElementById('tbody_clientes_modal');
+                if (!clientes.length) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-3">No se encontraron clientes.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = clientes.map(c => {
+                    const ubicacion = [c.colonia, c.ciudad].filter(Boolean).join(', ') || '-';
+                    const nombreEsc = (c.nombre || '').replace(/'/g, "\\'");
+                    return `
+                        <tr class="item-cliente-modal">
+                            <td>
+                                <strong class="text-dark d-block">${c.nombre}</strong>
+                                <small class="text-muted">${c.calle || ''}</small>
+                            </td>
+                            <td class="small">${ubicacion}</td>
+                            <td class="small text-muted">${c.telefono || 'Sin Teléfono'}</td>
+                            <td class="text-end pe-3">
+                                <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3 fw-semibold" onclick="setCliente('${c.id}', '${nombreEsc}')">
+                                    <i class="bi bi-check2 me-1"></i> Seleccionar
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            });
+        }, 250);
     }
 
     function alternarTipoVenta() {

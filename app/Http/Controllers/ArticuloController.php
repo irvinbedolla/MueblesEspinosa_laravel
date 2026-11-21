@@ -17,18 +17,50 @@ class ArticuloController extends Controller
     {
         $user = auth()->user();
         $busqueda = $request->get('buscar');
-        $esAdmin = $user->hasRole('admin') || $user->role === 1; // Ajustar según tu manejo de roles
+        $esAdmin = $user->hasRole('admin') || $user->role === 1;
 
-        // 1. Resumen según el rol
+        // Filtro de ubicación/usuario: 'general' (Almacén General) o el UUID/ID de un usuario
+        $ubicacion = $esAdmin ? $request->get('ubicacion', 'general') : (string) $user->id;
+        $usuariosInventario = collect();
+        $usuarioSeleccionado = null;
+
         if ($esAdmin) {
-            $resumen = [
-                'total_articulos' => Articulo::count(),
-                'stock_general'   => InventarioStock::sum('cantidad'),
-                'stock_almacen'   => InventarioStock::whereNull('user_id')->sum('cantidad'),
-                'stock_bajo'      => Articulo::whereHas('stocks', function($q) {
-                                        $q->whereNull('user_id');
-                                     })->get()->filter(fn($a) => $a->stock_almacen <= $a->stock_min)->count()
-            ];
+            $usuariosInventario = User::where('is_active', 1)
+                ->orderBy('username', 'asc')
+                ->get(['id', 'username']);
+
+            if ($ubicacion !== 'general' && $ubicacion !== '') {
+                $usuarioSeleccionado = $usuariosInventario->firstWhere('id', $ubicacion);
+                if (!$usuarioSeleccionado) {
+                    $ubicacion = 'general';
+                }
+            } else {
+                $ubicacion = 'general';
+            }
+        }
+
+        // 1. Resumen según el rol y el filtro seleccionado
+        if ($esAdmin) {
+            if ($usuarioSeleccionado) {
+                $stockUsuario = InventarioStock::where('user_id', $usuarioSeleccionado->id)->sum('cantidad');
+                $resumen = [
+                    'total_articulos' => InventarioStock::where('user_id', $usuarioSeleccionado->id)->where('cantidad', '>', 0)->count(),
+                    'stock_general'   => $stockUsuario,
+                    'stock_almacen'   => InventarioStock::whereNull('user_id')->sum('cantidad'),
+                    'stock_bajo'      => Articulo::whereHas('stocks', function ($q) {
+                        $q->whereNull('user_id')->whereRaw('cantidad <= articulos.stock_min');
+                    })->count(),
+                ];
+            } else {
+                $resumen = [
+                    'total_articulos' => Articulo::count(),
+                    'stock_general'   => InventarioStock::sum('cantidad'),
+                    'stock_almacen'   => InventarioStock::whereNull('user_id')->sum('cantidad'),
+                    'stock_bajo'      => Articulo::whereHas('stocks', function ($q) {
+                        $q->whereNull('user_id')->whereRaw('cantidad <= articulos.stock_min');
+                    })->count(),
+                ];
+            }
         } else {
             // Vendedor: solo ve sus métricas personales
             $stockVendedor = InventarioStock::where('user_id', $user->id)->sum('cantidad');
@@ -36,29 +68,43 @@ class ArticuloController extends Controller
                 'total_articulos' => InventarioStock::where('user_id', $user->id)->where('cantidad', '>', 0)->count(),
                 'stock_general'   => $stockVendedor,
                 'stock_almacen'   => 0,
-                'stock_bajo'      => 0
+                'stock_bajo'      => 0,
             ];
         }
 
-        // 2. Consulta filtrada por Rol
+        // 2. Consulta filtrada por Rol / Usuario seleccionado y Búsqueda
         $articulos = Articulo::with(['stocks.usuario', 'precios'])
             ->when(!$esAdmin, function ($q) use ($user) {
-                // VENDEDOR: solo ve artículos asignados a su cuenta con stock > 0
                 return $q->whereHas('stocks', function ($sk) use ($user) {
                     $sk->where('user_id', $user->id)->where('cantidad', '>', 0);
                 });
             })
+            ->when($esAdmin && $usuarioSeleccionado, function ($q) use ($usuarioSeleccionado) {
+                return $q->whereHas('stocks', function ($sk) use ($usuarioSeleccionado) {
+                    $sk->where('user_id', $usuarioSeleccionado->id)->where('cantidad', '>', 0);
+                });
+            })
             ->when($busqueda, function ($q, $busqueda) {
-                return $q->where('nombre', 'like', "%{$busqueda}%")
-                         ->orWhere('marca', 'like', "%{$busqueda}%")
-                         ->orWhere('barras', 'like', "%{$busqueda}%")
-                         ->orWhere('modelo', 'like', "%{$busqueda}%");
+                return $q->where(function ($sub) use ($busqueda) {
+                    $sub->where('nombre', 'like', "%{$busqueda}%")
+                        ->orWhere('marca', 'like', "%{$busqueda}%")
+                        ->orWhere('barras', 'like', "%{$busqueda}%")
+                        ->orWhere('modelo', 'like', "%{$busqueda}%");
+                });
             })
             ->latest()
             ->paginate(12)
             ->withQueryString();
 
-        return view('articulos.index', compact('articulos', 'busqueda', 'resumen', 'esAdmin'));
+        return view('articulos.index', compact(
+            'articulos',
+            'busqueda',
+            'resumen',
+            'esAdmin',
+            'ubicacion',
+            'usuariosInventario',
+            'usuarioSeleccionado'
+        ));
     }
 
     /**
@@ -106,62 +152,76 @@ class ArticuloController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'nombre'     => 'required|string|max:100',
-            'pcompra'    => 'required|numeric|min:0',
-            'pcontado'   => 'required|numeric|min:0',
-            'porcentaje' => 'required|numeric|min:0',
+            'nombre'        => 'required|string|max:100',
+            'pcompra'       => 'required|numeric|min:0',
+            'pcredito'      => 'required|numeric|min:0',
+            'pcontado'      => 'required|numeric|min:0',
+            'porcentaje'    => 'nullable|numeric|min:0',
             'stock_inicial' => 'required|integer|min:0',
-            'stock_min'  => 'required|integer|min:0',
+            'stock_min'     => 'required|integer|min:0',
         ]);
 
-        DB::transaction(function () use ($request) {
-            // 1. Calcular precio de crédito base
-            $pcredito = $request->pcompra + ($request->pcompra * ($request->porcentaje / 100));
+        try {
+            DB::transaction(function () use ($request) {
+                $pcompra  = floatval($request->pcompra);
+                $pcredito = floatval($request->pcredito);
+                $pcontado = floatval($request->pcontado);
 
-            // 2. Crear artículo
-            $articulo = Articulo::create([
-                'id'          => Str::uuid()->toString(),
-                'nombre'      => mb_strtoupper(trim($request->nombre)),
-                'marca'       => $request->marca,
-                'modelo'      => $request->modelo,
-                'barras'      => $request->barras,
-                'n_serie'     => $request->n_serie,
-                'descripcion' => $request->descripcion,
-                'categoria'   => $request->categoria,
-                'pcompra'     => $request->pcompra,
-                'pcontado'    => $request->pcontado,
-                'pcredito'    => $pcredito,
-                'porcentaje'  => $request->porcentaje,
-                'stock_min'   => $request->stock_min,
-            ]);
+                // Calcula el porcentaje automáticamente a partir de pcompra y pcredito
+                $porcentaje = $pcompra > 0
+                    ? round((($pcredito - $pcompra) / $pcompra) * 100, 2)
+                    : 0;
 
-            // 3. Crear stock inicial en Almacén General (user_id = null)
-            InventarioStock::create([
-                'id'          => Str::uuid()->toString(),
-                'articulo_id' => $articulo->id,
-                'user_id'     => null,
-                'cantidad'    => $request->stock_inicial,
-            ]);
+                // 1. Crear artículo
+                $articulo = Articulo::create([
+                    'id'          => Str::uuid()->toString(),
+                    'nombre'      => mb_strtoupper(trim($request->nombre)),
+                    'marca'       => $request->marca,
+                    'modelo'      => $request->modelo,
+                    'barras'      => $request->barras,
+                    'n_serie'     => $request->n_serie,
+                    'descripcion' => $request->descripcion,
+                    'categoria'   => $request->categoria,
+                    'pcompra'     => $pcompra,
+                    'pcontado'    => $pcontado,
+                    'pcredito'    => $pcredito,
+                    'porcentaje'  => $porcentaje,
+                    'stock_min'   => $request->stock_min,
+                ]);
 
-            // 4. Generar tabla de precios sugeridos de 1 a 12 meses usando la lógica original
-            $this->generarPreciosCredito($articulo->id, $pcredito, $request->input('precios_custom', []));
+                // 2. Crear stock inicial en Almacén General (user_id = null)
+                InventarioStock::create([
+                    'id'          => Str::uuid()->toString(),
+                    'articulo_id' => $articulo->id,
+                    'user_id'     => null,
+                    'cantidad'    => $request->stock_inicial,
+                ]);
 
-            // 5. Registrar en Kardex
-            Kardex::create([
-                'id'              => Str::uuid()->toString(),
-                'articulo_id'     => $articulo->id,
-                'user_id'         => auth()->id(),
-                'origen_user_id'  => null,
-                'destino_user_id' => null,
-                'tipo_movimiento' => 'Entrada_Inicial',
-                'cantidad'        => $request->stock_inicial,
-                'stock_anterior'  => 0,
-                'stock_nuevo'     => $request->stock_inicial,
-                'observaciones'   => 'Alta inicial del artículo en almacén general',
-            ]);
-        });
+                // 3. Generar tabla de precios sugeridos de 1 a 12 meses
+                $this->generarPreciosCredito($articulo->id, $pcredito, $request->input('precios_custom', []));
 
-        return redirect()->route('articulos.index')->with('success', 'Artículo registrado correctamente.');
+                // 4. Registrar en Kardex
+                Kardex::create([
+                    'id'              => Str::uuid()->toString(),
+                    'articulo_id'     => $articulo->id,
+                    'user_id'         => auth()->id(),
+                    'origen_user_id'  => null,
+                    'destino_user_id' => null,
+                    'tipo_movimiento' => 'Entrada_Inicial',
+                    'cantidad'        => $request->stock_inicial,
+                    'stock_anterior'  => 0,
+                    'stock_nuevo'     => $request->stock_inicial,
+                    'observaciones'   => 'Alta inicial del artículo en almacén general',
+                ]);
+            });
+
+            return redirect()->route('articulos.index')->with('success', 'Artículo registrado correctamente.');
+
+        } catch (\Throwable $e) {
+            return back()
+                ->withInput()
+                ->with('error', 'Error al guardar: ' . $e->getMessage());
+        }
     }
 
     public function edit(Articulo $articulo)

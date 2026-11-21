@@ -6,36 +6,52 @@ use App\Models\Cliente;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
+
 
 class ClienteController extends Controller
 {
     public function index(Request $request)
     {
-        $busqueda = $request->get('buscar');
+        $busqueda = trim((string) $request->input('buscar', ''));
 
-        // 1. Métricas para los Tarjetas de Resumen superior
+        // 1. Resumen métrico en UNA sola consulta SQL
+        $stats = DB::table('clientes')
+            ->selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'Activo' THEN 1 ELSE 0 END) as activos,
+                SUM(CASE WHEN status = 'Lista_Negra' THEN 1 ELSE 0 END) as lista_negra,
+                SUM(CASE WHEN (ubicacion IS NOT NULL AND ubicacion <> '') OR (latitud IS NOT NULL AND latitud <> '') THEN 1 ELSE 0 END) as con_gps
+            ")
+            ->first();
+
         $resumen = [
-            'total'       => Cliente::count(),
-            'activos'     => Cliente::where('status', 'Activo')->count(),
-            'lista_negra' => Cliente::where('status', 'Lista_Negra')->count(),
-            'con_gps'     => Cliente::whereNotNull('latitud')->count(),
+            'total'       => (int) ($stats->total ?? 0),
+            'activos'     => (int) ($stats->activos ?? 0),
+            'lista_negra' => (int) ($stats->lista_negra ?? 0),
+            'con_gps'     => (int) ($stats->con_gps ?? 0),
         ];
 
-        // 2. Consulta con paginación
-        $clientes = Cliente::with('usuario')
-            ->when($busqueda, function ($query, $busqueda) {
-                return $query->where('nombre', 'like', "%{$busqueda}%")
-                             ->orWhere('telefono', 'like', "%{$busqueda}%")
-                             ->orWhere('colonia', 'like', "%{$busqueda}%")
-                             ->orWhere('ciudad', 'like', "%{$busqueda}%");
-            })
-            ->latest()
-            ->paginate(12)
-            ->withQueryString();
+        // 2. Consulta paginada trayendo solo las columnas necesarias
+        $query = DB::table('clientes')
+            ->select('id', 'nombre', 'ine', 'telefono', 'calle', 'colonia', 'ciudad', 'status', 'ubicacion', 'latitud', 'longitud');
 
-        return view('clientes.index', compact('clientes', 'busqueda', 'resumen'));
+        if ($busqueda !== '') {
+            $query->where(function ($q) use ($busqueda) {
+                $q->where('nombre', 'like', "%{$busqueda}%")
+                ->orWhere('telefono', 'like', "%{$busqueda}%")
+                ->orWhere('colonia', 'like', "%{$busqueda}%")
+                ->orWhere('ciudad', 'like', "%{$busqueda}%")
+                ->orWhere('ine', 'like', "%{$busqueda}%");
+            });
+        }
+
+        $clientes = $query->orderBy('nombre', 'asc')
+                        ->paginate(20)
+                        ->appends(['buscar' => $busqueda]);
+
+        return view('clientes.index', compact('clientes', 'resumen', 'busqueda'));
     }
-
     public function create()
     {
         $usuarios = User::where('is_active', true)->get();

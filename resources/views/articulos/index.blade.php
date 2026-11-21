@@ -7,9 +7,24 @@
 <!-- ENCABEZADO UNIFICADO -->
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <div>
-        <h3 class="fw-bold text-dark m-0"><i class="bi bi-boxes text-primary me-2"></i>{{ $esAdmin ? 'Inventario General' : 'Mi Inventario' }}</h3>
+        <h3 class="fw-bold text-dark m-0">
+            <i class="bi bi-boxes text-primary me-2"></i>
+            @if(!$esAdmin)
+                Mi Inventario
+            @elseif($usuarioSeleccionado)
+                Inventario de {{ $usuarioSeleccionado->username }}
+            @else
+                Inventario General
+            @endif
+        </h3>
         <p class="text-muted small m-0">
-            {{ $esAdmin ? 'Control general de catálogo, existencias en almacén y distribución' : 'Artículos asignados a tu camioneta / ruta' }}
+            @if(!$esAdmin)
+                Artículos asignados a tu camioneta / ruta
+            @elseif($usuarioSeleccionado)
+                Existencias asignadas actualmente a {{ $usuarioSeleccionado->username }}
+            @else
+                Control general de catálogo, existencias en almacén y distribución
+            @endif
         </p>
     </div>
     
@@ -39,13 +54,23 @@
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm rounded-4 p-3 bg-white">
-            <small class="text-muted fw-bold d-block">{{ $esAdmin ? 'TOTAL PRODUCTOS' : 'MIS PRODUCTOS' }}</small>
+            <small class="text-muted fw-bold d-block">
+                {{ (!$esAdmin || $usuarioSeleccionado) ? 'PRODUCTOS ASIGNADOS' : 'TOTAL PRODUCTOS' }}
+            </small>
             <h4 class="fw-bold text-dark m-0 mt-1">{{ $resumen['total_articulos'] }}</h4>
         </div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm rounded-4 p-3 bg-white">
-            <small class="text-muted fw-bold d-block">{{ $esAdmin ? 'STOCK GLOBAL' : 'MI STOCK ASIGNADO' }}</small>
+            <small class="text-muted fw-bold d-block">
+                @if(!$esAdmin)
+                    MI STOCK ASIGNADO
+                @elseif($usuarioSeleccionado)
+                    STOCK DE {{ strtoupper($usuarioSeleccionado->username) }}
+                @else
+                    STOCK GLOBAL
+                @endif
+            </small>
             <h4 class="fw-bold text-primary m-0 mt-1">{{ $resumen['stock_general'] }} pzas.</h4>
         </div>
     </div>
@@ -69,17 +94,42 @@
     @endif
 </div>
 
-<!-- BUSCADOR / FILTRO -->
+<!-- BUSCADOR / FILTRO POR INVENTARIO DE USUARIO -->
 <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-    <form action="{{ route('articulos.index') }}" method="GET" class="row g-2 align-items-center">
-        <div class="col-md-10">
+    <form id="form_filtro_inventario" action="{{ route('articulos.index') }}" method="GET" class="row g-2 align-items-center">
+        @if($esAdmin)
+            <div class="col-md-4">
+                <div class="input-group">
+                    <span class="input-group-text bg-light border-end-0 text-primary">
+                        <i class="bi bi-person-badge"></i>
+                    </span>
+                    <select name="ubicacion" class="form-select bg-light border-start-0 fw-semibold text-dark" onchange="document.getElementById('form_filtro_inventario').submit()">
+                        <option value="general" {{ $ubicacion === 'general' ? 'selected' : '' }}>
+                            🏢 Inventario General (Almacén)
+                        </option>
+                        <optgroup label="Inventario por Usuario / Vendedor">
+                            @foreach($usuariosInventario as $usr)
+                                <option value="{{ $usr->id }}" {{ (string)$ubicacion === (string)$usr->id ? 'selected' : '' }}>
+                                    👤 {{ $usr->username }}
+                                </option>
+                            @endforeach
+                        </optgroup>
+                    </select>
+                </div>
+            </div>
+        @endif
+
+        <div class="{{ $esAdmin ? 'col-md-6' : 'col-md-10' }}">
             <div class="input-group">
                 <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-search"></i></span>
                 <input type="text" name="buscar" class="form-control bg-light border-start-0 ps-0" placeholder="Buscar por código de barras, nombre, marca o modelo..." value="{{ $busqueda }}">
             </div>
         </div>
+
         <div class="col-md-2 d-grid">
-            <button type="submit" class="btn btn-outline-primary rounded-3 fw-semibold">Filtrar</button>
+            <button type="submit" class="btn btn-outline-primary rounded-3 fw-semibold">
+                <i class="bi bi-funnel me-1"></i> Filtrar
+            </button>
         </div>
     </form>
 </div>
@@ -94,7 +144,15 @@
                     <th>Costo Compra</th>
                     <th>Precio Contado</th>
                     <th>Precio Crédito Base</th>
-                    <th class="text-center">{{ $esAdmin ? 'Stock Almacén' : 'Mi Stock' }}</th>
+                    <th class="text-center">
+                        @if(!$esAdmin)
+                            Mi Stock
+                        @elseif($usuarioSeleccionado)
+                            Stock ({{ $usuarioSeleccionado->username }})
+                        @else
+                            Stock Almacén
+                        @endif
+                    </th>
                     @if(auth()->user()->tienePermiso('inventory.edit') || auth()->user()->tienePermiso('inventory.delete'))
                         <th class="text-end pe-4">Acciones</th>
                     @endif
@@ -104,7 +162,10 @@
                 @forelse($articulos as $art)
                     @php
                         $stockAlmacen = $art->stock_almacen;
-                        $miStock = $art->stocks->where('user_id', auth()->id())->first()->cantidad ?? 0;
+                        $targetUserId = $esAdmin ? ($usuarioSeleccionado->id ?? null) : auth()->id();
+                        $stockUsuario = $targetUserId
+                            ? ($art->stocks->where('user_id', $targetUserId)->first()->cantidad ?? 0)
+                            : 0;
                         $stocksVendedores = $art->stocks->filter(fn($s) => $s->user_id !== null && $s->cantidad > 0);
                         $totalVendedores = $stocksVendedores->sum('cantidad');
                     @endphp
@@ -117,9 +178,9 @@
                         <td class="fw-bold text-success">${{ number_format($art->pcontado, 2) }}</td>
                         <td class="fw-bold text-primary">${{ number_format($art->pcredito, 2) }}</td>
                         
-                        <!-- STOCK (ALMACEN O VENDEDOR) -->
+                        <!-- STOCK (ALMACÉN GENERAL O USUARIO SELECCIONADO) -->
                         <td class="text-center">
-                            @if($esAdmin)
+                            @if($esAdmin && !$usuarioSeleccionado)
                                 <div class="d-flex align-items-center justify-content-center gap-1">
                                     <span class="badge {{ $stockAlmacen <= $art->stock_min ? 'bg-danger bg-opacity-10 text-danger' : 'bg-success bg-opacity-10 text-success' }} px-3 py-2 rounded-pill fw-bold">
                                         {{ $stockAlmacen }}
@@ -130,7 +191,7 @@
                                 </div>
                             @else
                                 <span class="badge bg-primary bg-opacity-10 text-primary px-3 py-2 rounded-pill fw-bold fs-6">
-                                    {{ $miStock }} pzas.
+                                    {{ $stockUsuario }} pzas.
                                 </span>
                             @endif
                         </td>
