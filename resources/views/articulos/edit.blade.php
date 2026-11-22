@@ -65,20 +65,25 @@
 
         <!-- PRECIOS Y ALERTA STOCK -->
         <div class="card border-0 shadow-sm rounded-4 bg-white mb-4 p-4 p-md-5">
-            <h5 class="fw-bold text-dark mb-4"><i class="bi bi-currency-dollar text-success me-2"></i>Precios y Configuración de Stock</h5>
+            <h5 class="fw-bold text-dark mb-4"><i class="bi bi-currency-dollar text-success me-2"></i>Costos, Precios y Stock</h5>
 
-            <div class="row g-4 mb-4">
-                <div class="col-md-4">
-                    <label class="form-label fw-semibold text-secondary small">Precio Crédito ($) (*)</label>
-                    <input type="number" step="0.01" id="pcompra" name="pcompra" class="form-control bg-light rounded-3 fw-bold text-primary" value="{{ old('pcompra', $articulo->pcompra) }}" required oninput="recalcularPrecios()">
+            <div class="row g-3 mb-4">
+                <div class="col-6 col-md-3">
+                    <label class="form-label fw-semibold text-secondary small">Precio Compra ($) (*)</label>
+                    <input type="number" step="0.01" id="pcompra" name="pcompra" class="form-control bg-light rounded-3 fw-bold text-dark" value="{{ old('pcompra', $articulo->pcompra) }}" required>
                 </div>
 
-                <div class="col-md-4">
+                <div class="col-6 col-md-3">
+                    <label class="form-label fw-semibold text-secondary small">Precio Crédito ($) (*)</label>
+                    <input type="number" step="0.01" id="pcredito" name="pcredito" class="form-control bg-light rounded-3 fw-bold text-primary" value="{{ old('pcredito', $articulo->pcredito) }}" required oninput="recalcularPrecios()">
+                </div>
+
+                <div class="col-6 col-md-3">
                     <label class="form-label fw-semibold text-secondary small">Precio Contado ($) (*)</label>
                     <input type="number" step="0.01" id="pcontado" name="pcontado" class="form-control bg-light rounded-3 fw-bold text-success" value="{{ old('pcontado', $articulo->pcontado) }}" required>
                 </div>
 
-                <div class="col-md-4">
+                <div class="col-6 col-md-3">
                     <label class="form-label fw-semibold text-secondary small">Stock Mínimo Alerta (*)</label>
                     <input type="number" name="stock_min" class="form-control bg-light rounded-3" value="{{ old('stock_min', $articulo->stock_min) }}" min="0" required>
                 </div>
@@ -120,8 +125,8 @@ function actualizarEtiquetaTotal(m) {
 }
 
 function recalcularPrecios() {
-    const precioCredito = parseFloat(document.getElementById('pcompra').value) || 0;
-
+    const precioCredito = parseFloat(document.getElementById('pcredito').value) || 0;
+    
     // Porcentajes de descuento aplicados sobre el Precio Crédito
     const descuentos = { 
         1: 40, 2: 35, 3: 30, 4: 25, 

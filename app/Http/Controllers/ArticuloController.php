@@ -235,16 +235,20 @@ class ArticuloController extends Controller
         $request->validate([
             'nombre'     => 'required|string|max:100',
             'pcompra'    => 'required|numeric|min:0',
+            'pcredito'   => 'required|numeric|min:0',
             'pcontado'   => 'required|numeric|min:0',
             'porcentaje' => 'nullable|numeric|min:0',
             'stock_min'  => 'required|integer|min:0',
         ]);
 
         DB::transaction(function () use ($request, $articulo) {
-            $porcentaje = floatval($request->porcentaje ?? 0);
-            
-            // 1. Corrección del error de sintaxis en el cálculo de pcredito
-            $pcredito = $request->pcompra + ($request->pcompra * ($porcentaje / 100));
+            $pcompra  = floatval($request->pcompra);
+            $pcredito = floatval($request->pcredito);
+            $pcontado = floatval($request->pcontado);
+
+            $porcentaje = $request->filled('porcentaje')
+                ? floatval($request->porcentaje)
+                : ($pcompra > 0 ? round((($pcredito - $pcompra) / $pcompra) * 100, 2) : 0);
 
             $articulo->update([
                 'nombre'      => mb_strtoupper(trim($request->nombre)),
@@ -254,44 +258,39 @@ class ArticuloController extends Controller
                 'n_serie'     => $request->n_serie,
                 'descripcion' => $request->descripcion,
                 'categoria'   => $request->categoria,
-                'pcompra'     => $request->pcompra,
-                'pcontado'    => $request->pcontado,
+                'pcompra'     => $pcompra,
+                'pcontado'    => $pcontado,
                 'pcredito'    => $pcredito,
                 'porcentaje'  => $porcentaje,
                 'stock_min'   => $request->stock_min,
             ]);
 
-            // 2. Re-calcular o actualizar la tabla de precios
-            $this->generarPreciosCredito($articulo->id, floatval($request->pcompra), $request->input('precios_custom', []));
+            // Re-calcular o actualizar la tabla de precios partiendo de $pcredito
+            $this->generarPreciosCredito($articulo->id, $pcredito, $request->input('precios_custom', []));
         });
 
         return redirect()->route('articulos.index')->with('success', 'Artículo actualizado con éxito.');
     }
 
     /**
-     * Lógica para calcular la tabla de precios sugeridos a meses
+     * Lógica para calcular la tabla de precios sugeridos a meses (descuentos sobre pcredito)
      */
-    private function generarPreciosCredito(string $articuloId, float $pcompra, array $preciosCustom = [])
+    private function generarPreciosCredito(string $articuloId, float $pcredito, array $preciosCustom = [])
     {
-        // Porcentajes de utilidad directa sobre el precio de compra
-        $porcentajesUtilidad = [
+        $descuentosMes = [
             1 => 40, 2 => 35, 3 => 30, 4 => 25, 
             5 => 20, 6 => 15, 7 => 10, 8 => 5,
             9 => 0,  10 => 0, 11 => 0, 12 => 0
         ];
 
         for ($m = 1; $m <= 12; $m++) {
-            // Prioriza el precio manual introducido por el usuario en la vista
             if (isset($preciosCustom[$m]) && floatval($preciosCustom[$m]) > 0) {
                 $precioTotal = floatval($preciosCustom[$m]);
             } else {
-                $utilidadPct = $porcentajesUtilidad[$m] ?? 0;
-                // Corrección del error de sintaxis en el cálculo de la utilidad
-                $montoUtilidad = $pcompra * ($utilidadPct / 100);
-                $precioTotal = $pcompra + $montoUtilidad;
+                $pctDesc = $descuentosMes[$m] ?? 0;
+                $precioTotal = $pcredito - ($pcredito * ($pctDesc / 100));
             }
 
-            // Evitar regenerar UUIDs al actualizar los precios existentes
             $registroExistente = ArticuloPrecio::where('articulo_id', $articuloId)
                 ->where('meses', $m)
                 ->first();
@@ -311,6 +310,7 @@ class ArticuloController extends Controller
             );
         }
     }
+
 
     /**
      * Vista de Traspasos (Mover stock entre Almacén y Vendedores)
