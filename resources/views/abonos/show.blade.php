@@ -86,6 +86,35 @@
         </div>
     </div>
 
+    <!-- ALERTAS DE COMPROBANTE / LIQUIDACIÓN WHATSAPP -->
+    @if($aux4 <= 0 || $venta->status === 'Pagado')
+        <div class="alert alert-success border-0 shadow-sm rounded-4 p-4 text-center mb-4">
+            <h5 class="fw-bold text-success mb-1">
+                <i class="bi bi-patch-check-fill me-2"></i>¡CUENTA TOTALMENTE LIQUIDADA!
+            </h5>
+            @if(!empty($cliente->telefono))
+                <a href="{{ $urlWhatsapp }}" id="btnWhatsappComprobante" target="_blank" class="btn btn-success px-4 py-2 mt-2 shadow-sm rounded-3 fw-bold">
+                    <i class="bi bi-whatsapp me-2"></i> Enviar Ticket de Liquidación
+                </a>
+            @else
+                <small class="d-block text-muted mt-2">Registre un teléfono de 10 dígitos para enviar el ticket por WhatsApp.</small>
+            @endif
+        </div>
+    @elseif($abonoHoy)
+        <div class="alert alert-info border-0 shadow-sm rounded-4 p-4 text-center mb-4">
+            <h5 class="fw-bold text-info mb-1">
+                <i class="bi bi-send-check-fill me-2"></i>Abono capturado el día de hoy
+            </h5>
+            @if(!empty($cliente->telefono))
+                <a href="{{ $urlWhatsapp }}" id="btnWhatsappComprobante" target="_blank" class="btn btn-info text-white px-4 py-2 mt-2 shadow-sm rounded-3 fw-bold">
+                    <i class="bi bi-whatsapp me-2"></i> Enviar Comprobante de Abono
+                </a>
+            @else
+                <small class="d-block text-muted mt-2">Registre un teléfono de 10 dígitos para enviar el comprobante por WhatsApp.</small>
+            @endif
+        </div>
+    @endif
+    
     <!-- BLOQUE: OPERACIONES EN CAMPO -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
         <div class="card-body p-3">

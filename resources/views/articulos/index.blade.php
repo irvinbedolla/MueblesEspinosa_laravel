@@ -30,7 +30,7 @@
     
     <!-- ACCIONES SOLO VISIBLES PARA ADMINISTRADORES -->
     @if($esAdmin)
-        <div class="d-flex gap-2">
+        <div class="d-flex flex-wrap gap-2">
             @if(auth()->user()->tienePermiso('inventory.kardex'))
                 <a href="{{ route('articulos.kardex') }}" class="btn btn-outline-secondary rounded-pill px-3 fw-semibold">
                     <i class="bi bi-journal-text me-1"></i> Movimientos
@@ -53,7 +53,7 @@
 <!-- TARJETAS DE RESUMEN MÉTRICO -->
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">
-        <div class="card border-0 shadow-sm rounded-4 p-3 bg-white">
+        <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100">
             <small class="text-muted fw-bold d-block">
                 {{ (!$esAdmin || $usuarioSeleccionado) ? 'PRODUCTOS ASIGNADOS' : 'TOTAL PRODUCTOS' }}
             </small>
@@ -61,7 +61,7 @@
         </div>
     </div>
     <div class="col-6 col-md-3">
-        <div class="card border-0 shadow-sm rounded-4 p-3 bg-white">
+        <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100">
             <small class="text-muted fw-bold d-block">
                 @if(!$esAdmin)
                     MI STOCK ASIGNADO
@@ -77,15 +77,14 @@
     
     @if($esAdmin)
         <div class="col-6 col-md-3">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100">
                 <small class="text-muted fw-bold d-block">EN ALMACÉN GENERAL</small>
                 <h4 class="fw-bold text-success m-0 mt-1">{{ $resumen['stock_almacen'] }} pzas.</h4>
             </div>
         </div>
-        <!-- TARJETA CLIQUEABLE PARA APARTADO DE BAJO STOCK -->
         <div class="col-6 col-md-3">
             <a href="{{ route('articulos.bajo_stock') }}" class="text-decoration-none">
-                <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-4 border-danger shadow-hover">
+                <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-4 border-danger shadow-hover h-100">
                     <small class="text-muted fw-bold d-block text-danger">ALERTA STOCK BAJO <i class="bi bi-arrow-right-short"></i></small>
                     <h4 class="fw-bold text-danger m-0 mt-1">{{ $resumen['stock_bajo'] }} prod.</h4>
                 </div>
@@ -134,17 +133,17 @@
     </form>
 </div>
 
-<!-- TABLA DE ARTÍCULOS -->
+<!-- TABLA DE ARTÍCULOS (SIN MODALES DENTRO PARA EVITAR BLOQUEO EN MÓVIL) -->
 <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden">
     <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light text-muted small">
                 <tr>
                     <th class="ps-4">Producto</th>
-                    <th>Costo Compra</th>
-                    <th>Precio Contado</th>
-                    <th>Precio Crédito Base</th>
-                    <th class="text-center">
+                    <th class="text-nowrap">Costo Compra</th>
+                    <th class="text-nowrap">Precio Contado</th>
+                    <th class="text-nowrap">Precio Crédito Base</th>
+                    <th class="text-center text-nowrap">
                         @if(!$esAdmin)
                             Mi Stock
                         @elseif($usuarioSeleccionado)
@@ -154,7 +153,7 @@
                         @endif
                     </th>
                     @if(auth()->user()->tienePermiso('inventory.edit') || auth()->user()->tienePermiso('inventory.delete'))
-                        <th class="text-end pe-4">Acciones</th>
+                        <th class="text-end pe-4 text-nowrap">Acciones</th>
                     @endif
                 </tr>
             </thead>
@@ -166,22 +165,20 @@
                         $stockUsuario = $targetUserId
                             ? ($art->stocks->where('user_id', $targetUserId)->first()->cantidad ?? 0)
                             : 0;
-                        $stocksVendedores = $art->stocks->filter(fn($s) => $s->user_id !== null && $s->cantidad > 0);
-                        $totalVendedores = $stocksVendedores->sum('cantidad');
                     @endphp
                     <tr>
-                        <td class="ps-4">
+                        <td class="ps-4" style="min-width: 190px;">
                             <strong class="text-dark d-block fs-6">{{ $art->nombre }}</strong>
                             <small class="text-muted">{{ $art->marca }} {{ $art->modelo ? '('.$art->modelo.')' : '' }} | Cod: {{ $art->barras ?? 'S/C' }}</small>
                         </td>
-                        <td class="text-muted">${{ number_format($art->pcompra, 2) }}</td>
-                        <td class="fw-bold text-success">${{ number_format($art->pcontado, 2) }}</td>
-                        <td class="fw-bold text-primary">${{ number_format($art->pcredito, 2) }}</td>
+                        <td class="text-muted text-nowrap">${{ number_format($art->pcompra, 2) }}</td>
+                        <td class="fw-bold text-success text-nowrap">${{ number_format($art->pcontado, 2) }}</td>
+                        <td class="fw-bold text-primary text-nowrap">${{ number_format($art->pcredito, 2) }}</td>
                         
-                        <!-- STOCK (ALMACÉN GENERAL O USUARIO SELECCIONADO) -->
-                        <td class="text-center">
+                        <!-- STOCK -->
+                        <td class="text-center text-nowrap">
                             @if($esAdmin && !$usuarioSeleccionado)
-                                <div class="d-flex align-items-center justify-content-center gap-1">
+                                <div class="d-inline-flex align-items-center justify-content-center gap-1">
                                     <span class="badge {{ $stockAlmacen <= $art->stock_min ? 'bg-danger bg-opacity-10 text-danger' : 'bg-success bg-opacity-10 text-success' }} px-3 py-2 rounded-pill fw-bold">
                                         {{ $stockAlmacen }}
                                     </span>
@@ -196,100 +193,28 @@
                             @endif
                         </td>
 
-                        <!-- COLUMNAS EXCLUSIVAS DE ADMIN -->
+                        <!-- ACCIONES SIEMPRE EN LÍNEA HORIZONTAL -->
                         @if(auth()->user()->tienePermiso('inventory.edit') || auth()->user()->tienePermiso('inventory.delete'))
-                            <td class="text-end pe-4">
-                                @if(auth()->user()->tienePermiso('inventory.edit'))
-                                    <a href="{{ route('articulos.edit', $art->id) }}" class="btn btn-sm btn-outline-primary rounded-circle me-1" title="Editar">
-                                        <i class="bi bi-pencil"></i>
-                                    </a>
-                                @endif
-                                @if(auth()->user()->tienePermiso('inventory.delete'))
-                                    <form action="{{ route('articulos.destroy', $art->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Eliminar artículo?');">
-                                        @csrf
-                                        @method('DELETE')
-                                        <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </form>
-                                @endif
+                            <td class="text-end pe-4 text-nowrap">
+                                <div class="d-inline-flex align-items-center gap-1">
+                                    @if(auth()->user()->tienePermiso('inventory.edit'))
+                                        <a href="{{ route('articulos.edit', $art->id) }}" class="btn btn-sm btn-outline-primary rounded-circle" title="Editar">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                    @endif
+                                    @if(auth()->user()->tienePermiso('inventory.delete'))
+                                        <form action="{{ route('articulos.destroy', $art->id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Eliminar artículo?');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit" class="btn btn-sm btn-outline-danger rounded-circle" title="Eliminar">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    @endif
+                                </div>
                             </td>
                         @endif
                     </tr>
-
-                    @if($esAdmin)
-                        <!-- MODAL PARA SURTIR ALMACÉN -->
-                        <div class="modal fade" id="modalSurtir_{{ $art->id }}" tabindex="-1" aria-hidden="true">
-                            <div class="modal-dialog modal-dialog-centered modal-sm">
-                                <div class="modal-content border-0 shadow-lg rounded-4">
-                                    <form action="{{ route('articulos.surtir') }}" method="POST">
-                                        @csrf
-                                        <input type="hidden" name="articulo_id" value="{{ $art->id }}">
-                                        <div class="modal-header border-0 pb-0">
-                                            <h6 class="modal-title fw-bold text-dark">
-                                                <i class="bi bi-box-arrow-in-down text-success me-2"></i>Surtir a Almacén
-                                            </h6>
-                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                                        </div>
-                                        <div class="modal-body py-3">
-                                            <div class="text-muted extra-small mb-3">
-                                                <strong>{{ $art->nombre }}</strong> (Existencia: {{ $stockAlmacen }} pzas.)
-                                            </div>
-                                            <div class="mb-3">
-                                                <label class="form-label fw-semibold text-secondary small">Piezas a Agregar (*)</label>
-                                                <input type="number" name="cantidad_suma" class="form-control rounded-3 fw-bold" min="1" value="1" required>
-                                            </div>
-                                            <div>
-                                                <label class="form-label fw-semibold text-secondary small">Notas / Proveedor</label>
-                                                <input type="text" name="motivo" class="form-control rounded-3" placeholder="Ej. Entrada por compra">
-                                            </div>
-                                        </div>
-                                        <div class="modal-footer border-0 pt-0">
-                                            <button type="button" class="btn btn-light btn-sm rounded-pill px-3 fw-semibold text-muted" data-bs-dismiss="modal">Cancelar</button>
-                                            <button type="submit" class="btn btn-success btn-sm rounded-pill px-4 fw-bold">Agregar Stock</button>
-                                        </div>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- MODAL DE DESGLOSE DE VENDEDORES -->
-                        @if($totalVendedores > 0)
-                            <div class="modal fade" id="modalStock_{{ $art->id }}" tabindex="-1" aria-hidden="true">
-                                <div class="modal-dialog modal-dialog-centered modal-sm">
-                                    <div class="modal-content border-0 shadow-lg rounded-4">
-                                        <div class="modal-header border-0 pb-0">
-                                            <h6 class="modal-title fw-bold text-dark">
-                                                <i class="bi bi-person-badge text-info me-2"></i>Asignación a Vendedores
-                                            </h6>
-                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                                        </div>
-                                        <div class="modal-body py-3">
-                                            <div class="text-muted extra-small mb-3 border-bottom pb-2">
-                                                <strong>{{ $art->nombre }}</strong>
-                                            </div>
-                                            <ul class="list-group list-group-flush small">
-                                                @foreach($stocksVendedores as $st)
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-0">
-                                                        <span class="fw-semibold text-dark">
-                                                            <i class="bi bi-person me-1 text-secondary"></i> {{ $st->usuario->username ?? 'Desconocido' }}
-                                                        </span>
-                                                        <span class="badge bg-primary rounded-pill px-3 py-1 fw-bold">
-                                                            {{ $st->cantidad }} pzas.
-                                                        </span>
-                                                    </li>
-                                                @endforeach
-                                            </ul>
-                                        </div>
-                                        <div class="modal-footer border-0 pt-0">
-                                            <button type="button" class="btn btn-light btn-sm rounded-pill px-3 w-100 fw-semibold text-muted" data-bs-dismiss="modal">Cerrar</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        @endif
-                    @endif
-
                 @empty
                     <tr>
                         <td colspan="7" class="text-center text-muted py-4">No se encontraron artículos disponibles.</td>
@@ -299,7 +224,7 @@
         </table>
     </div>
 
-    <!-- PIE DE TABLA CON PAGINACIÓN EN ESPAÑOL DE BOOTSTRAP 5 -->
+    <!-- PIE DE TABLA CON PAGINACIÓN -->
     @if($articulos->hasPages())
         <div class="card-footer bg-white border-0 py-3 px-4 d-flex flex-wrap justify-content-between align-items-center gap-2">
             <small class="text-muted">Mostrando {{ $articulos->firstItem() }} al {{ $articulos->lastItem() }} de {{ $articulos->total() }} artículos</small>
@@ -307,4 +232,87 @@
         </div>
     @endif
 </div>
+
+<!-- MODALES FUERA DE LA TABLA Y DE CONTENEDORES CON OVERFLOW-HIDDEN -->
+@if($esAdmin)
+    @foreach($articulos as $art)
+        @php
+            $stockAlmacen = $art->stock_almacen;
+            $stocksVendedores = $art->stocks->filter(fn($s) => $s->user_id !== null && $s->cantidad > 0);
+            $totalVendedores = $stocksVendedores->sum('cantidad');
+        @endphp
+
+        <!-- MODAL PARA SURTIR ALMACÉN -->
+        <div class="modal fade" id="modalSurtir_{{ $art->id }}" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-sm">
+                <div class="modal-content border-0 shadow-lg rounded-4">
+                    <form action="{{ route('articulos.surtir') }}" method="POST">
+                        @csrf
+                        <input type="hidden" name="articulo_id" value="{{ $art->id }}">
+                        <div class="modal-header border-0 pb-0">
+                            <h6 class="modal-title fw-bold text-dark">
+                                <i class="bi bi-box-arrow-in-down text-success me-2"></i>Surtir a Almacén
+                            </h6>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body py-3">
+                            <div class="text-muted small mb-3">
+                                <strong>{{ $art->nombre }}</strong> (Existencia: {{ $stockAlmacen }} pzas.)
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-secondary small">Piezas a Agregar (*)</label>
+                                <input type="number" name="cantidad_suma" class="form-control rounded-3 fw-bold" min="1" value="1" required>
+                            </div>
+                            <div>
+                                <label class="form-label fw-semibold text-secondary small">Notas / Proveedor</label>
+                                <input type="text" name="motivo" class="form-control rounded-3" placeholder="Ej. Entrada por compra">
+                            </div>
+                        </div>
+                        <div class="modal-footer border-0 pt-0">
+                            <button type="button" class="btn btn-light btn-sm rounded-pill px-3 fw-semibold text-muted" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" class="btn btn-success btn-sm rounded-pill px-4 fw-bold">Agregar Stock</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL DE DESGLOSE DE VENDEDORES -->
+        @if($totalVendedores > 0)
+            <div class="modal fade" id="modalStock_{{ $art->id }}" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered modal-sm">
+                    <div class="modal-content border-0 shadow-lg rounded-4">
+                        <div class="modal-header border-0 pb-0">
+                            <h6 class="modal-title fw-bold text-dark">
+                                <i class="bi bi-person-badge text-info me-2"></i>Asignación a Vendedores
+                            </h6>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body py-3">
+                            <div class="text-muted small mb-3 border-bottom pb-2">
+                                <strong>{{ $art->nombre }}</strong>
+                            </div>
+                            <ul class="list-group list-group-flush small">
+                                @foreach($stocksVendedores as $st)
+                                    <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-0">
+                                        <span class="fw-semibold text-dark">
+                                            <i class="bi bi-person me-1 text-secondary"></i> {{ $st->usuario->username ?? 'Desconocido' }}
+                                        </span>
+                                        <span class="badge bg-primary rounded-pill px-3 py-1 fw-bold">
+                                            {{ $st->cantidad }} pzas.
+                                        </span>
+                                    </li>
+                                @endforeach
+                            </ul>
+                        </div>
+                        <div class="modal-footer border-0 pt-0">
+                            <button type="button" class="btn btn-light btn-sm rounded-pill px-3 w-100 fw-semibold text-muted" data-bs-dismiss="modal">Cerrar</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        @endif
+    @endforeach
+@endif
+
 @endsection

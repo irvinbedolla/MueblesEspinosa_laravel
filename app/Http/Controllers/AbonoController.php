@@ -10,11 +10,9 @@ use Carbon\Carbon;
 
 class AbonoController extends Controller
 {
-
-
     /**
-     * Vista principal de Abonos
-    */
+     * Vista principal de Abonos (Optimizada en 1 sola consulta + Paginación)
+     */
     public function index(Request $request)
     {
         $user = auth()->user();
@@ -23,41 +21,9 @@ class AbonoController extends Controller
         $tipoAbono      = $request->input('tipo', 1);
         $dia            = $request->input('Dia', '');
         $filtroCobrador = $request->input('cobrador', 0);
+        $buscar         = trim((string) $request->input('buscar', ''));
 
-        // 1. Consulta base de IDs de ventas pendientes
-        $idsQuery = DB::table('ventas as v')
-            ->whereNotIn('v.status', ['Pagado', 'Eliminar', 'Devolucion', 'Recogido'])
-            ->where('v.saldo_restante', '>', 0);
-
-        // Filtro por Rol (Si no es Admin, solo ve sus cobros asignados)
-        if ($tipoSeccion != 0) {
-            $idsQuery->where(function($q) use ($user) {
-                $q->where('v.cobrador_id', $user->id);
-                if (!empty($user->user_id_legacy)) {
-                    $q->orWhere('v.cobrador_id', $user->user_id_legacy);
-                }
-            });
-        } 
-        // Filtro por Cobrador Seleccionado
-        else if (!empty($filtroCobrador) && $filtroCobrador != '0') {
-            $idsQuery->where(function($q) use ($filtroCobrador) {
-                $q->where('v.cobrador_id', $filtroCobrador);
-                if (is_numeric($filtroCobrador)) {
-                    $q->orWhere('v.cobrador_id', $filtroCobrador);
-                }
-            });
-        }
-
-        // Filtro por Día de la Semana
-        if (!empty($dia) && $dia != 'Todos') {
-            $idsQuery->where('v.dia_semana', $dia);
-        }
-
-        // Obtener los IDs de venta únicos sin duplicación
-        $ventasIds = $idsQuery->distinct()->pluck('v.id');
-
-        // 2. Consulta de datos formateados trayendo solo los IDs únicos obtenidos
-        $ventas = DB::table('ventas as v')
+        $query = DB::table('ventas as v')
             ->select(
                 'v.id',
                 'v.folio',
@@ -71,8 +37,8 @@ class AbonoController extends Controller
                 'v.dia_semana',
                 DB::raw("DATE_FORMAT(v.fecha_venta, '%d / %m / %Y') as fecha_formato"),
                 DB::raw("DATE_FORMAT(v.fecha_final_pago, '%d / %m / %Y') as fpago_formato"),
-                'c.nombre as cliente_nombre', 
-                'c.telefono as cliente_telefono', 
+                'c.nombre as cliente_nombre',
+                'c.telefono as cliente_telefono',
                 'c.ciudad as cliente_ciudad',
                 'c.calle as cliente_calle',
                 'c.colonia as cliente_colonia',
@@ -82,22 +48,55 @@ class AbonoController extends Controller
             ->leftJoin('clientes as c', 'v.cliente_id', '=', 'c.id')
             ->leftJoin('users as u_ven', 'v.vendedor_id', '=', 'u_ven.id')
             ->leftJoin('users as u_cob', 'v.cobrador_id', '=', 'u_cob.id')
-            ->whereIn('v.id', $ventasIds)
-            ->orderBy('v.fecha_venta', 'asc')
-            ->get();
+            ->whereNotIn('v.status', ['Pagado', 'Eliminar', 'Devolucion', 'Recogido'])
+            ->where('v.saldo_restante', '>', 0);
 
-        // Obtener lista de cobradores activos para el selector/filtro
-        $cobradores = DB::table('users')
-            ->select('id', DB::raw("COALESCE(user_id_legacy, id) as user_id_legacy"), 'username')
-            ->where('is_active', 1)
-            ->get();
+        // Filtro por Rol (Si no es Admin, solo ve sus cobros asignados)
+        if ($tipoSeccion != 0) {
+            $query->where(function ($q) use ($user) {
+                $q->where('v.cobrador_id', (string) $user->id);
+                if (!empty($user->user_id_legacy)) {
+                    $q->orWhere('v.cobrador_id', (string) $user->user_id_legacy);
+                }
+            });
+        } elseif (!empty($filtroCobrador) && $filtroCobrador != '0') {
+            $query->where('v.cobrador_id', (string) $filtroCobrador);
+        }
+
+        // Filtro por Día de la Semana
+        if (!empty($dia) && $dia != 'Todos') {
+            $query->where('v.dia_semana', $dia);
+        }
+
+        // Búsqueda rápida en servidor (si existe input 'buscar' en la vista)
+        if ($buscar !== '') {
+            $query->where(function ($q) use ($buscar) {
+                $q->where('c.nombre', 'like', "%{$buscar}%")
+                  ->orWhere('v.folio', 'like', "%{$buscar}%")
+                  ->orWhere('v.venta_id_legacy', 'like', "%{$buscar}%");
+            });
+        }
+
+        // Paginación de 30 registros por página para carga instantánea en móvil/4G
+        $ventas = $query->orderBy('v.fecha_venta', 'asc')
+            ->paginate(30)
+            ->withQueryString();
+
+        // Cachear cobradores 10 minutos para evitar consultarlo en cada recarga
+        $cobradores = cache()->remember('cobradores_activos_abonos', 600, function () {
+            return DB::table('users')
+                ->select('id', DB::raw("COALESCE(user_id_legacy, id) as user_id_legacy"), 'username')
+                ->where('is_active', 1)
+                ->orderBy('username')
+                ->get();
+        });
 
         return view('abonos.index', compact(
-            'ventas', 
-            'cobradores', 
-            'tipoAbono', 
-            'dia', 
-            'filtroCobrador', 
+            'ventas',
+            'cobradores',
+            'tipoAbono',
+            'dia',
+            'filtroCobrador',
             'tipoSeccion'
         ));
     }
@@ -197,7 +196,7 @@ class AbonoController extends Controller
         // 3. Descuento asignado a la Venta
         $ventaDescuento = floatval($venta->descuento ?? 0);
 
-        // 4. Saldo restante real (Total original - Suma de abonos - Descuento)
+        // 4. Saldo restante real
         $aux4 = max(0, floatval($venta->saldo_restante));
 
         // 5. Cobrador y Vendedor
@@ -235,6 +234,60 @@ class AbonoController extends Controller
         $diaCobro = $venta->dia_cobro ?? $venta->dia_semana ?? null;
         $proximoPago = $venta->fecha_proximo_pago ?? $venta->fecha_primer_pago ?? $venta->fecha_siguiente_pago ?? null;
 
+        // 8. Lógica de Comprobante / Ticket de WhatsApp
+        $fechaHoyStr   = now()->format('Y-m-d');
+        $fechaUltimoAb = $ultimoAbono ? Carbon::parse($ultimoAbono->a_fecha)->format('Y-m-d') : null;
+        $abonoHoy      = ($fechaUltimoAb === $fechaHoyStr);
+        $urlWhatsapp   = '#';
+
+        $telWa = preg_replace('/[^0-9]/', '', (string) ($cliente->telefono ?? ''));
+        if (strlen($telWa) === 10) {
+            $telWa = '52' . $telWa;
+        }
+
+        $folioCuenta   = $venta->folio ?? $venta->venta_id_legacy ?? $venta->id;
+        $nombreCliente = $cliente->nombre ?? 'Cliente';
+        $ultimoMonto   = floatval($ultimoAbono->a_pago ?? 0);
+        $horaAbonoStr  = $ultimoAbono->a_hora ?? ($ultimoAbono->a_fecha ?? now()->format('Y-m-d H:i:s'));
+        $quienAtendio  = $ultimoAbono->nombre_cobrador ?? $cobradorAsignado;
+
+        if ($aux4 <= 0 || $venta->status === 'Pagado') {
+            $fechaLiq = $fechaUltimoAb ?? $fechaHoyStr;
+            $textoTicket = "✨ VENTA LIQUIDADA ✨\n"
+                . "MUEBLES ESPINOSA\n"
+                . "---------------------------\n"
+                . "Cuenta: #{$folioCuenta}\n"
+                . "Cliente: {$nombreCliente}\n"
+                . "Fecha: {$fechaLiq}\n"
+                . "Atendio: {$quienAtendio}\n"
+                . "---------------------------\n"
+                . "¡Su cuenta ha sido pagada en su totalidad!\n"
+                . "Último Pago: $" . number_format($ultimoMonto, 2) . "\n"
+                . "Total Pagado: $" . number_format($suma, 2) . "\n"
+                . "SALDO RESTANTE: $0.00\n"
+                . "---------------------------\n"
+                . "Agradecemos profundamente su preferencia y puntualidad. ¡Esperamos verle pronto para su próxima compra! 🤝";
+
+            $urlWhatsapp = "https://api.whatsapp.com/send?phone={$telWa}&text=" . rawurlencode($textoTicket);
+        } elseif ($abonoHoy) {
+            $textoTicket = "MUEBLES ESPINOSA\n"
+                . "Venta: {$folioCuenta}\n"
+                . "Calle Revolución N°104\n"
+                . "Col. Heberto Castillo\n"
+                . "Cd. Altamirano Gro.\n"
+                . "Fecha y Hora: {$horaAbonoStr}\n"
+                . "Atendio: {$quienAtendio}\n"
+                . "Cliente: {$nombreCliente}\n"
+                . "Folio: {$folioCuenta}\n"
+                . "Total: $" . number_format($venta->total, 2) . "\n"
+                . "Usted Abono: la cantidad de $" . number_format($ultimoMonto, 2) . ".\n"
+                . "Gracias por su abono\n"
+                . "Total Abonado: $" . number_format($suma, 2) . "\n"
+                . "Restante: $" . number_format($aux4, 2) . ".";
+
+            $urlWhatsapp = "https://api.whatsapp.com/send?phone={$telWa}&text=" . rawurlencode($textoTicket);
+        }
+
         return view('abonos.show', compact(
             'venta',
             'cliente',
@@ -251,14 +304,16 @@ class AbonoController extends Controller
             'vendedorAsignado',
             'cobradoresDisponibles',
             'detallesArticulos',
-            'mesesAmortizacion'
+            'mesesAmortizacion',
+            'urlWhatsapp',
+            'abonoHoy'
         ));
     }
 
     /**
      * Procesa y guarda un nuevo abono para la venta.
      */
-public function store(Request $request)
+    public function store(Request $request)
     {
         try {
             $ventaId         = $request->input('id');
@@ -365,17 +420,20 @@ public function store(Request $request)
 
             DB::table('abonos')->insert($abonoData);
 
-            // 5. Actualización de la Venta
+            // 5. Actualización de la Venta (protegida con Schema::hasColumn)
             if ($tipoAccion == '2') {
                 $dataUpdate = [
-                    'status'           => 'Pagado',
-                    'venta_fecha_pago' => $fechaActual,
-                    'updated_at'       => $hoy
+                    'status'     => 'Pagado',
+                    'updated_at' => $hoy,
                 ];
-                if (Schema::hasColumn('ventas', 'saldo_restante')) $dataUpdate['saldo_restante'] = 0;
-                if (Schema::hasColumn('ventas', 'venta_restante')) $dataUpdate['venta_restante'] = 0;
+
+                if (Schema::hasColumn('ventas', 'venta_fecha_pago'))   $dataUpdate['venta_fecha_pago'] = $fechaActual;
+                if (Schema::hasColumn('ventas', 'fecha_pago'))         $dataUpdate['fecha_pago'] = $fechaActual;
+                if (Schema::hasColumn('ventas', 'fecha_liquidacion'))  $dataUpdate['fecha_liquidacion'] = $fechaActual;
+                if (Schema::hasColumn('ventas', 'saldo_restante'))     $dataUpdate['saldo_restante'] = 0;
+                if (Schema::hasColumn('ventas', 'venta_restante'))     $dataUpdate['venta_restante'] = 0;
                 if (Schema::hasColumn('ventas', 'fecha_proximo_pago')) $dataUpdate['fecha_proximo_pago'] = null;
-                if (Schema::hasColumn('ventas', 'nota_cobranza')) $dataUpdate['nota_cobranza'] = null;
+                if (Schema::hasColumn('ventas', 'nota_cobranza'))      $dataUpdate['nota_cobranza'] = null;
 
                 DB::table('ventas')->where('id', $venta->id)->update($dataUpdate);
                 $mensaje = '¡Cuenta totalmente liquidada con éxito!';
@@ -397,20 +455,24 @@ public function store(Request $request)
 
                 $dataUpdate = [
                     'status'     => $nuevoStatus,
-                    'updated_at' => $hoy
+                    'updated_at' => $hoy,
                 ];
 
-                if (Schema::hasColumn('ventas', 'saldo_restante')) $dataUpdate['saldo_restante'] = $nuevoSaldo;
-                if (Schema::hasColumn('ventas', 'venta_restante')) $dataUpdate['venta_restante'] = $nuevoSaldo;
-                if (Schema::hasColumn('ventas', 'fecha_proximo_pago')) {
-                    $dataUpdate['fecha_proximo_pago'] = ($nuevoSaldo <= 0) ? null : $nuevaFechaPago;
+                if ($nuevoSaldo <= 0) {
+                    if (Schema::hasColumn('ventas', 'venta_fecha_pago'))  $dataUpdate['venta_fecha_pago'] = $fechaActual;
+                    if (Schema::hasColumn('ventas', 'fecha_pago'))        $dataUpdate['fecha_pago'] = $fechaActual;
+                    if (Schema::hasColumn('ventas', 'fecha_liquidacion')) $dataUpdate['fecha_liquidacion'] = $fechaActual;
                 }
-                if (Schema::hasColumn('ventas', 'nota_cobranza')) $dataUpdate['nota_cobranza'] = null;
-                if (Schema::hasColumn('ventas', 'proximo_pago')) $dataUpdate['proximo_pago'] = $nuevaFechaPago;
-                if (Schema::hasColumn('ventas', 'fecha_siguiente_pago')) $dataUpdate['fecha_siguiente_pago'] = $nuevaFechaPago;
-                if (Schema::hasColumn('ventas', 'venta_pagof')) $dataUpdate['venta_pagof'] = $nuevaFechaPago;
-                if (Schema::hasColumn('ventas', 'dia_cobro')) $dataUpdate['dia_cobro'] = $nuevoDiaCobro;
-                if (Schema::hasColumn('ventas', 'dia_semana')) $dataUpdate['dia_semana'] = $nuevoDiaCobro;
+
+                if (Schema::hasColumn('ventas', 'saldo_restante'))       $dataUpdate['saldo_restante'] = $nuevoSaldo;
+                if (Schema::hasColumn('ventas', 'venta_restante'))       $dataUpdate['venta_restante'] = $nuevoSaldo;
+                if (Schema::hasColumn('ventas', 'fecha_proximo_pago'))   $dataUpdate['fecha_proximo_pago'] = ($nuevoSaldo <= 0) ? null : $nuevaFechaPago;
+                if (Schema::hasColumn('ventas', 'nota_cobranza'))        $dataUpdate['nota_cobranza'] = null;
+                if (Schema::hasColumn('ventas', 'proximo_pago'))         $dataUpdate['proximo_pago'] = ($nuevoSaldo <= 0) ? null : $nuevaFechaPago;
+                if (Schema::hasColumn('ventas', 'fecha_siguiente_pago')) $dataUpdate['fecha_siguiente_pago'] = ($nuevoSaldo <= 0) ? null : $nuevaFechaPago;
+                if (Schema::hasColumn('ventas', 'venta_pagof'))          $dataUpdate['venta_pagof'] = ($nuevoSaldo <= 0) ? null : $nuevaFechaPago;
+                if (Schema::hasColumn('ventas', 'dia_cobro'))            $dataUpdate['dia_cobro'] = $nuevoDiaCobro;
+                if (Schema::hasColumn('ventas', 'dia_semana'))           $dataUpdate['dia_semana'] = $nuevoDiaCobro;
 
                 DB::table('ventas')->where('id', $venta->id)->update($dataUpdate);
 

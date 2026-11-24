@@ -87,6 +87,43 @@ class VentaController extends Controller
         try {
             DB::beginTransaction();
 
+            $fechaVenta = $request->fecha_venta ?? date('Y-m-d');
+
+            // =========================================================================
+            // CANDADO ANTI-DUPLICADOS: Validar Cliente + Fecha + Artículos y Cantidades
+            // =========================================================================
+            // Normalizar firma de artículos entrantes: "articulo_id:cantidad|articulo_id:cantidad"
+            $firmaNueva = collect($request->articulos)
+                ->groupBy('id')
+                ->map(fn ($items, $artId) => $artId . ':' . $items->sum('cantidad'))
+                ->sortKeys()
+                ->values()
+                ->implode('|');
+
+            $ventasMismoDiaCliente = Venta::with('detalles')
+                ->where('cliente_id', $request->cliente_id)
+                ->whereDate('fecha_venta', $fechaVenta)
+                ->whereNotIn('status', ['Eliminar', 'Devolucion', 'Recogido'])
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($ventasMismoDiaCliente as $vExistente) {
+                $firmaExistente = $vExistente->detalles
+                    ->groupBy('articulo_id')
+                    ->map(fn ($dets, $artId) => $artId . ':' . $dets->sum('cantidad'))
+                    ->sortKeys()
+                    ->values()
+                    ->implode('|');
+
+                if ($firmaExistente === $firmaNueva) {
+                    DB::rollBack();
+                    return response()->json([
+                        'status'  => 'error',
+                        'message' => "⚠️ Venta duplicada detectada: ya existe el Folio #{$vExistente->folio} para este mismo cliente, en la misma fecha ({$fechaVenta}) y con los mismos artículos."
+                    ], 422);
+                }
+            }
+            
             // 1. Obtener de forma atómica y segura el siguiente folio consecutivo
             $ultimoFolio = DB::table('ventas')->lockForUpdate()->max('folio');
             $folio = ($ultimoFolio && $ultimoFolio >= 1000) ? ($ultimoFolio + 1) : 1001;

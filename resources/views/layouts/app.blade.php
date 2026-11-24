@@ -278,6 +278,7 @@
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('form').forEach(form => {
                 form.addEventListener('submit', function (e) {
+                    if (e.defaultPrevented) return; // Respeta confirm() cancelados o validaciones JS
                     const btnSubmit = form.querySelector('button[type="submit"]');
                     if (btnSubmit) btnSubmit.disabled = true;
                     mostrarCargando('Guardando cambios...', 'No cierre ni recargue la página.');

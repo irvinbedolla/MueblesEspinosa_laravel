@@ -10,9 +10,11 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Schema;
 
 class ArticuloController extends Controller
 {
+
     public function index(Request $request)
     {
         $user = auth()->user();
@@ -39,41 +41,74 @@ class ArticuloController extends Controller
             }
         }
 
-        // 1. Resumen según el rol y el filtro seleccionado
+        // Scope reutilizable: excluye artículos desactivados/eliminados lógicamente
+        $tieneActivo = Schema::hasColumn('articulos', 'activo');
+        $tieneStatus = Schema::hasColumn('articulos', 'status');
+
+        $soloActivos = function ($q) use ($tieneActivo, $tieneStatus) {
+            if ($tieneActivo) {
+                $q->where('articulos.activo', 1);
+            }
+            if ($tieneStatus) {
+                $q->where(function ($sub) {
+                    $sub->whereNull('articulos.status')
+                        ->orWhereNotIn('articulos.status', ['Inactivo', 'Eliminado', 'Baja']);
+                });
+            }
+        };
+
+        // 1. Resumen según el rol y el filtro seleccionado (solo artículos activos y disponibles)
         if ($esAdmin) {
             if ($usuarioSeleccionado) {
-                $stockUsuario = InventarioStock::where('user_id', $usuarioSeleccionado->id)->sum('cantidad');
+                $stockUsuario = InventarioStock::where('user_id', $usuarioSeleccionado->id)
+                    ->whereHas('articulo', $soloActivos)
+                    ->sum('cantidad');
+
                 $resumen = [
-                    'total_articulos' => InventarioStock::where('user_id', $usuarioSeleccionado->id)->where('cantidad', '>', 0)->count(),
+                    'total_articulos' => Articulo::where($soloActivos)
+                        ->whereHas('stocks', function ($q) use ($usuarioSeleccionado) {
+                            $q->where('user_id', $usuarioSeleccionado->id)->where('cantidad', '>', 0);
+                        })->count(),
                     'stock_general'   => $stockUsuario,
-                    'stock_almacen'   => InventarioStock::whereNull('user_id')->sum('cantidad'),
-                    'stock_bajo'      => Articulo::whereHas('stocks', function ($q) {
-                        $q->whereNull('user_id')->whereRaw('cantidad <= articulos.stock_min');
+                    'stock_almacen'   => InventarioStock::whereNull('user_id')->whereHas('articulo', $soloActivos)->sum('cantidad'),
+                    'stock_bajo'      => Articulo::where($soloActivos)->whereHas('stocks', function ($q) {
+                        $q->whereNull('user_id')->where('cantidad', '>', 0)->whereRaw('cantidad <= articulos.stock_min');
                     })->count(),
                 ];
             } else {
+                // Solo cuenta productos activos que tengan al menos 1 pieza disponible en Almacén o con vendedores
                 $resumen = [
-                    'total_articulos' => Articulo::count(),
-                    'stock_general'   => InventarioStock::sum('cantidad'),
-                    'stock_almacen'   => InventarioStock::whereNull('user_id')->sum('cantidad'),
-                    'stock_bajo'      => Articulo::whereHas('stocks', function ($q) {
-                        $q->whereNull('user_id')->whereRaw('cantidad <= articulos.stock_min');
+                    'total_articulos' => Articulo::where($soloActivos)
+                        ->whereHas('stocks', function ($q) {
+                            $q->where('cantidad', '>', 0);
+                        })->count(),
+                    'stock_general'   => InventarioStock::whereHas('articulo', $soloActivos)->sum('cantidad'),
+                    'stock_almacen'   => InventarioStock::whereNull('user_id')->whereHas('articulo', $soloActivos)->sum('cantidad'),
+                    'stock_bajo'      => Articulo::where($soloActivos)->whereHas('stocks', function ($q) {
+                        $q->whereNull('user_id')->where('cantidad', '>', 0)->whereRaw('cantidad <= articulos.stock_min');
                     })->count(),
                 ];
             }
         } else {
-            // Vendedor: solo ve sus métricas personales
-            $stockVendedor = InventarioStock::where('user_id', $user->id)->sum('cantidad');
+            // Vendedor: solo ve sus artículos activos con existencias > 0
+            $stockVendedor = InventarioStock::where('user_id', $user->id)
+                ->whereHas('articulo', $soloActivos)
+                ->sum('cantidad');
+
             $resumen = [
-                'total_articulos' => InventarioStock::where('user_id', $user->id)->where('cantidad', '>', 0)->count(),
+                'total_articulos' => Articulo::where($soloActivos)
+                    ->whereHas('stocks', function ($q) use ($user) {
+                        $q->where('user_id', $user->id)->where('cantidad', '>', 0);
+                    })->count(),
                 'stock_general'   => $stockVendedor,
                 'stock_almacen'   => 0,
                 'stock_bajo'      => 0,
             ];
         }
 
-        // 2. Consulta filtrada por Rol / Usuario seleccionado y Búsqueda
+        // 2. Consulta filtrada por Rol / Usuario seleccionado, activos y con stock disponible (> 0)
         $articulos = Articulo::with(['stocks.usuario', 'precios'])
+            ->where($soloActivos)
             ->when(!$esAdmin, function ($q) use ($user) {
                 return $q->whereHas('stocks', function ($sk) use ($user) {
                     $sk->where('user_id', $user->id)->where('cantidad', '>', 0);
@@ -82,6 +117,13 @@ class ArticuloController extends Controller
             ->when($esAdmin && $usuarioSeleccionado, function ($q) use ($usuarioSeleccionado) {
                 return $q->whereHas('stocks', function ($sk) use ($usuarioSeleccionado) {
                     $sk->where('user_id', $usuarioSeleccionado->id)->where('cantidad', '>', 0);
+                });
+            })
+            ->when($esAdmin && !$usuarioSeleccionado, function ($q) {
+                // En Inventario General (Almacén): solo muestra artículos con stock > 0
+                // (si quieres que incluya stock de vendedores aunque almacén sea 0, quita ->whereNull('user_id'))
+                return $q->whereHas('stocks', function ($sk) {
+                    $sk->whereNull('user_id')->where('cantidad', '>', 0);
                 });
             })
             ->when($busqueda, function ($q, $busqueda) {
@@ -161,16 +203,45 @@ class ArticuloController extends Controller
             'stock_min'     => 'required|integer|min:0',
         ]);
 
+        // Dentro de store() en ArticuloController.php (después de $request->validate)
+        $nombreNorm = mb_strtoupper(trim($request->nombre));
+        $marcaNorm  = mb_strtoupper(trim((string) $request->marca));
+        $modeloNorm = mb_strtoupper(trim((string) $request->modelo));
+        $barrasNorm = trim((string) $request->barras);
+
+        // 1. Validar código de barras único (si no viene vacío)
+        if ($barrasNorm !== '') {
+            $existeBarras = Articulo::where('barras', $barrasNorm)
+                ->when(Schema::hasColumn('articulos', 'activo'), fn ($q) => $q->where('activo', 1))
+                ->exists();
+
+            if ($existeBarras) {
+                return back()->withInput()->with('error', "Ya existe un artículo registrado con el código de barras '{$barrasNorm}'.");
+            }
+        }
+
+        // 2. Validar misma combinación de Nombre + Marca + Modelo
+        $existeArticulo = Articulo::whereRaw('UPPER(TRIM(nombre)) = ?', [$nombreNorm])
+            ->whereRaw("UPPER(TRIM(COALESCE(marca, ''))) = ?", [$marcaNorm])
+            ->whereRaw("UPPER(TRIM(COALESCE(modelo, ''))) = ?", [$modeloNorm])
+            ->when(Schema::hasColumn('articulos', 'activo'), fn ($q) => $q->where('activo', 1))
+            ->exists();
+
+        if ($existeArticulo) {
+            return back()->withInput()->with('error', "El artículo '{$nombreNorm}' (Marca: " . ($marcaNorm ?: 'S/M') . ", Modelo: " . ($modeloNorm ?: 'S/M') . ") ya está registrado en el catálogo.");
+        }
+
         try {
             DB::transaction(function () use ($request) {
                 $pcompra  = floatval($request->pcompra);
                 $pcredito = floatval($request->pcredito);
                 $pcontado = floatval($request->pcontado);
 
-                // Calcula el porcentaje automáticamente a partir de pcompra y pcredito
-                $porcentaje = $pcompra > 0
-                    ? round((($pcredito - $pcompra) / $pcompra) * 100, 2)
+                // Calcula el porcentaje y lo acota a 999.99 para respetar DECIMAL(5,2) en MySQL
+                $porcentajeCalc = ($pcompra > 0 && $pcredito >= $pcompra)
+                    ? (($pcredito - $pcompra) / $pcompra) * 100
                     : 0;
+                $porcentaje = min(999.99, round($porcentajeCalc, 2));
 
                 // 1. Crear artículo
                 $articulo = Articulo::create([
@@ -241,35 +312,74 @@ class ArticuloController extends Controller
             'stock_min'  => 'required|integer|min:0',
         ]);
 
-        DB::transaction(function () use ($request, $articulo) {
-            $pcompra  = floatval($request->pcompra);
-            $pcredito = floatval($request->pcredito);
-            $pcontado = floatval($request->pcontado);
+        // Dentro de store() en ArticuloController.php (después de $request->validate)
+        $nombreNorm = mb_strtoupper(trim($request->nombre));
+        $marcaNorm  = mb_strtoupper(trim((string) $request->marca));
+        $modeloNorm = mb_strtoupper(trim((string) $request->modelo));
+        $barrasNorm = trim((string) $request->barras);
 
-            $porcentaje = $request->filled('porcentaje')
-                ? floatval($request->porcentaje)
-                : ($pcompra > 0 ? round((($pcredito - $pcompra) / $pcompra) * 100, 2) : 0);
+        // 1. Validar código de barras único (excluyendo el artículo actual)
+        if ($barrasNorm !== '') {
+            $existeBarras = Articulo::where('barras', $barrasNorm)
+                ->where('id', '!=', $articulo->id)
+                ->when(Schema::hasColumn('articulos', 'activo'), fn ($q) => $q->where('activo', 1))
+                ->exists();
 
-            $articulo->update([
-                'nombre'      => mb_strtoupper(trim($request->nombre)),
-                'marca'       => $request->marca,
-                'modelo'      => $request->modelo,
-                'barras'      => $request->barras,
-                'n_serie'     => $request->n_serie,
-                'descripcion' => $request->descripcion,
-                'categoria'   => $request->categoria,
-                'pcompra'     => $pcompra,
-                'pcontado'    => $pcontado,
-                'pcredito'    => $pcredito,
-                'porcentaje'  => $porcentaje,
-                'stock_min'   => $request->stock_min,
-            ]);
+            if ($existeBarras) {
+                return back()->withInput()->with('error', "Ya existe otro artículo registrado con el código de barras '{$barrasNorm}'.");
+            }
+        }
 
-            // Re-calcular o actualizar la tabla de precios partiendo de $pcredito
-            $this->generarPreciosCredito($articulo->id, $pcredito, $request->input('precios_custom', []));
-        });
+        // 2. Validar misma combinación de Nombre + Marca + Modelo (excluyendo el artículo actual)
+        $existeArticulo = Articulo::whereRaw('UPPER(TRIM(nombre)) = ?', [$nombreNorm])
+            ->whereRaw("UPPER(TRIM(COALESCE(marca, ''))) = ?", [$marcaNorm])
+            ->whereRaw("UPPER(TRIM(COALESCE(modelo, ''))) = ?", [$modeloNorm])
+            ->where('id', '!=', $articulo->id)
+            ->when(Schema::hasColumn('articulos', 'activo'), fn ($q) => $q->where('activo', 1))
+            ->exists();
 
-        return redirect()->route('articulos.index')->with('success', 'Artículo actualizado con éxito.');
+        if ($existeArticulo) {
+            return back()->withInput()->with('error', "Ya existe otro artículo '{$nombreNorm}' (Marca: " . ($marcaNorm ?: 'S/M') . ", Modelo: " . ($modeloNorm ?: 'S/M') . ") en el catálogo.");
+        }
+
+        try {
+            DB::transaction(function () use ($request, $articulo) {
+                $pcompra  = floatval($request->pcompra);
+                $pcredito = floatval($request->pcredito);
+                $pcontado = floatval($request->pcontado);
+
+                // Calcula el porcentaje y lo acota a 999.99 para respetar DECIMAL(5,2) en MySQL
+                $porcentajeCalc = $request->filled('porcentaje')
+                    ? floatval($request->porcentaje)
+                    : (($pcompra > 0 && $pcredito >= $pcompra) ? (($pcredito - $pcompra) / $pcompra) * 100 : 0);
+                $porcentaje = min(999.99, round($porcentajeCalc, 2));
+
+                $articulo->update([
+                    'nombre'      => mb_strtoupper(trim($request->nombre)),
+                    'marca'       => $request->marca,
+                    'modelo'      => $request->modelo,
+                    'barras'      => $request->barras,
+                    'n_serie'     => $request->n_serie,
+                    'descripcion' => $request->descripcion,
+                    'categoria'   => $request->categoria,
+                    'pcompra'     => $pcompra,
+                    'pcontado'    => $pcontado,
+                    'pcredito'    => $pcredito,
+                    'porcentaje'  => $porcentaje,
+                    'stock_min'   => $request->stock_min,
+                ]);
+
+                // Re-calcular o actualizar la tabla de precios partiendo de $pcredito
+                $this->generarPreciosCredito($articulo->id, $pcredito, $request->input('precios_custom', []));
+            });
+
+            return redirect()->route('articulos.index')->with('success', 'Artículo actualizado con éxito.');
+
+        } catch (\Throwable $e) {
+            return back()
+                ->withInput()
+                ->with('error', 'Error al actualizar: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -336,52 +446,75 @@ class ArticuloController extends Controller
         ]);
 
         if ($request->origen === $request->destino) {
-            return back()->withErrors(['msg' => 'El origen y el destino no pueden ser iguales.']);
+            return back()
+                ->withInput()
+                ->with('error', 'El origen y el destino no pueden ser iguales.');
         }
 
-        DB::transaction(function () use ($request) {
-            $origenUserId  = $request->origen === 'almacen' ? null : $request->origen;
-            $destinoUserId = $request->destino === 'almacen' ? null : $request->destino;
+        try {
+            DB::transaction(function () use ($request) {
+                $origenUserId  = $request->origen === 'almacen' ? null : $request->origen;
+                $destinoUserId = $request->destino === 'almacen' ? null : $request->destino;
 
-            // Stock Origen
-            $stockOrigen = InventarioStock::firstOrCreate([
-                'articulo_id' => $request->articulo_id,
-                'user_id'     => $origenUserId
-            ], ['id' => Str::uuid()->toString(), 'cantidad' => 0]);
+                // Consultar Stock Origen (sin crear registro vacío si no existe)
+                $stockOrigen = InventarioStock::where('articulo_id', $request->articulo_id)
+                    ->where('user_id', $origenUserId)
+                    ->lockForUpdate()
+                    ->first();
 
-            if ($stockOrigen->cantidad < $request->cantidad) {
-                throw new \Exception('No hay suficiente stock en el origen seleccionado.');
-            }
+                $disponible = $stockOrigen ? (int) $stockOrigen->cantidad : 0;
 
-            // Stock Destino
-            $stockDestino = InventarioStock::firstOrCreate([
-                'articulo_id' => $request->articulo_id,
-                'user_id'     => $destinoUserId
-            ], ['id' => Str::uuid()->toString(), 'cantidad' => 0]);
+                if ($disponible < (int) $request->cantidad) {
+                    $nombreOrigen = $origenUserId === null
+                        ? 'Almacén General'
+                        : (User::where('id', $origenUserId)->value('username') ?? 'el vendedor seleccionado');
 
-            // Descontar origen e incrementar destino
-            $stockOrigen->decrement('cantidad', $request->cantidad);
-            $stockDestino->increment('cantidad', $request->cantidad);
+                    throw new \Exception("Stock insuficiente en {$nombreOrigen}. Disponible: {$disponible} pza(s), solicitadas: {$request->cantidad} pza(s).");
+                }
 
-            // Determinar tipo de movimiento
-            $tipo = ($origenUserId === null) ? 'Asignacion_Vendedor' : (($destinoUserId === null) ? 'Devolucion_Almacen' : 'Traspaso_Entre_Vendedores');
+                // Stock Destino
+                $stockDestino = InventarioStock::firstOrCreate(
+                    [
+                        'articulo_id' => $request->articulo_id,
+                        'user_id'     => $destinoUserId,
+                    ],
+                    [
+                        'id'       => Str::uuid()->toString(),
+                        'cantidad' => 0,
+                    ]
+                );
 
-            // Auditoría Kardex
-            Kardex::create([
-                'id'              => Str::uuid()->toString(),
-                'articulo_id'     => $request->articulo_id,
-                'user_id'         => auth()->id(),
-                'origen_user_id'  => $origenUserId,
-                'destino_user_id' => $destinoUserId,
-                'tipo_movimiento' => $tipo,
-                'cantidad'        => $request->cantidad,
-                'stock_anterior'  => $stockOrigen->cantidad + $request->cantidad,
-                'stock_nuevo'     => $stockOrigen->cantidad,
-                'observaciones'   => $request->observaciones ?? 'Traspaso de inventario',
-            ]);
-        });
+                // Descontar origen e incrementar destino
+                $stockOrigen->decrement('cantidad', $request->cantidad);
+                $stockDestino->increment('cantidad', $request->cantidad);
 
-        return redirect()->route('articulos.index')->with('success', 'Traspaso realizado con éxito.');
+                // Determinar tipo de movimiento
+                $tipo = ($origenUserId === null)
+                    ? 'Asignacion_Vendedor'
+                    : (($destinoUserId === null) ? 'Devolucion_Almacen' : 'Traspaso_Entre_Vendedores');
+
+                // Auditoría Kardex
+                Kardex::create([
+                    'id'              => Str::uuid()->toString(),
+                    'articulo_id'     => $request->articulo_id,
+                    'user_id'         => auth()->id(),
+                    'origen_user_id'  => $origenUserId,
+                    'destino_user_id' => $destinoUserId,
+                    'tipo_movimiento' => $tipo,
+                    'cantidad'        => $request->cantidad,
+                    'stock_anterior'  => $disponible,
+                    'stock_nuevo'     => $disponible - (int) $request->cantidad,
+                    'observaciones'   => $request->observaciones ?? 'Traspaso de inventario',
+                ]);
+            });
+
+            return redirect()->route('articulos.index')->with('success', 'Traspaso realizado con éxito.');
+
+        } catch (\Throwable $e) {
+            return back()
+                ->withInput()
+                ->with('error', $e->getMessage());
+        }
     }
 
     /**
@@ -446,6 +579,56 @@ class ArticuloController extends Controller
     private function autorizarAdmin() {
         if (!auth()->user()->hasRole('admin') && auth()->user()->role !== 1) {
             abort(403, 'Acción no autorizada para tu perfil.');
+        }
+    }
+
+    /**
+     * Elimina o desactiva un artículo del catálogo.
+     */
+    public function destroy($id)
+    {
+        try {
+            $articulo = DB::table('articulos')
+                ->where('id', $id)
+                ->first();
+
+            if (!$articulo) {
+                return back()->with('error', 'No se encontró el artículo especificado.');
+            }
+
+            // Verificar si el artículo ya tiene ventas o movimientos asociados
+            $tieneVentas = DB::table('venta_detalles')
+                ->where('articulo_id', $articulo->id)
+                ->exists();
+
+            if ($tieneVentas) {
+                // Si tiene historial de ventas, no se borra físicamente para no romper reportes; se desactiva
+                if (Schema::hasColumn('articulos', 'activo')) {
+                    DB::table('articulos')->where('id', $articulo->id)->update([
+                        'activo'     => 0,
+                        'updated_at' => now(),
+                    ]);
+                    return back()->with('success', 'El artículo tiene historial de ventas, por lo que fue desactivado correctamente.');
+                }
+
+                if (Schema::hasColumn('articulos', 'status')) {
+                    DB::table('articulos')->where('id', $articulo->id)->update([
+                        'status'     => 'Inactivo',
+                        'updated_at' => now(),
+                    ]);
+                    return back()->with('success', 'El artículo tiene historial de ventas, por lo que fue marcado como Inactivo.');
+                }
+
+                return back()->with('error', 'No se puede eliminar este artículo porque ya está registrado en una o más ventas.');
+            }
+
+            // Si no tiene ventas asociadas, se elimina de forma segura
+            DB::table('articulos')->where('id', $articulo->id)->delete();
+
+            return back()->with('success', 'Artículo eliminado correctamente.');
+
+        } catch (\Exception $e) {
+            return back()->with('error', 'No se pudo eliminar el artículo: ' . $e->getMessage());
         }
     }
 }
