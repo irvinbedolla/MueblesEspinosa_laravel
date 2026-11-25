@@ -10,13 +10,10 @@ use Carbon\Carbon;
 
 class AbonoController extends Controller
 {
-    /**
-     * Vista principal de Abonos (Optimizada en 1 sola consulta + Paginación)
-     */
     public function index(Request $request)
     {
-        $user = auth()->user();
-        $tipoSeccion = $user->isAdmin() ? 0 : 1;
+        // Temporal: habilitar vista global para todos los usuarios
+        $tipoSeccion = 0;
 
         $tipoAbono      = $request->input('tipo', 1);
         $dia            = $request->input('Dia', '');
@@ -51,15 +48,8 @@ class AbonoController extends Controller
             ->whereNotIn('v.status', ['Pagado', 'Eliminar', 'Devolucion', 'Recogido'])
             ->where('v.saldo_restante', '>', 0);
 
-        // Filtro por Rol (Si no es Admin, solo ve sus cobros asignados)
-        if ($tipoSeccion != 0) {
-            $query->where(function ($q) use ($user) {
-                $q->where('v.cobrador_id', (string) $user->id);
-                if (!empty($user->user_id_legacy)) {
-                    $q->orWhere('v.cobrador_id', (string) $user->user_id_legacy);
-                }
-            });
-        } elseif (!empty($filtroCobrador) && $filtroCobrador != '0') {
+        // Filtro opcional por Cobrador Seleccionado (sin restricción por usuario logueado)
+        if (!empty($filtroCobrador) && $filtroCobrador != '0') {
             $query->where('v.cobrador_id', (string) $filtroCobrador);
         }
 
@@ -77,10 +67,8 @@ class AbonoController extends Controller
             });
         }
 
-        // Paginación de 30 registros por página para carga instantánea en móvil/4G
-        $ventas = $query->orderBy('v.fecha_venta', 'asc')
-            ->paginate(30)
-            ->withQueryString();
+        // Obtener resultados en una sola consulta optimizada
+        $ventas = $query->orderBy('v.fecha_venta', 'asc')->get();
 
         // Cachear cobradores 10 minutos para evitar consultarlo en cada recarga
         $cobradores = cache()->remember('cobradores_activos_abonos', 600, function () {
@@ -100,7 +88,6 @@ class AbonoController extends Controller
             'tipoSeccion'
         ));
     }
-
     /**
      * Muestra el detalle de la venta, historial de abonos y el formulario para abonar.
      */

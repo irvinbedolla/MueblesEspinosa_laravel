@@ -36,6 +36,7 @@ class VentaController extends Controller
         $clientes = DB::table('clientes')
         ->select('id', 'nombre', 'telefono', 'calle', 'colonia', 'ciudad')
         ->where('status', 'Activo')
+        ->whereNull('deleted_at')
         ->orderBy('nombre')
         ->limit(30)
         ->get();
@@ -1417,6 +1418,7 @@ public function cambiarEstatusStatus(Request $request, $id)
         $clientes = DB::table('clientes')
             ->select('id', 'nombre', 'telefono', 'calle', 'colonia', 'ciudad')
             ->where('status', 'Activo')
+            ->whereNull('deleted_at')
             ->when($q !== '', function ($query) use ($q) {
                 $query->where(function ($sub) use ($q) {
                     $sub->where('nombre', 'like', "%{$q}%")

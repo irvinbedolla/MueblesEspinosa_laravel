@@ -15,8 +15,9 @@ class ClienteController extends Controller
     {
         $busqueda = trim((string) $request->input('buscar', ''));
 
-        // 1. Resumen métrico en UNA sola consulta SQL
+        // 1. Resumen métrico en UNA sola consulta SQL (excluyendo eliminados)
         $stats = DB::table('clientes')
+            ->whereNull('deleted_at')
             ->selectRaw("
                 COUNT(*) as total,
                 SUM(CASE WHEN status = 'Activo' THEN 1 ELSE 0 END) as activos,
@@ -32,17 +33,18 @@ class ClienteController extends Controller
             'con_gps'     => (int) ($stats->con_gps ?? 0),
         ];
 
-        // 2. Consulta paginada trayendo solo las columnas necesarias
+        // 2. Consulta paginada trayendo solo las columnas necesarias (excluyendo eliminados)
         $query = DB::table('clientes')
+            ->whereNull('deleted_at')
             ->select('id', 'nombre', 'ine', 'telefono', 'calle', 'colonia', 'ciudad', 'status', 'ubicacion', 'latitud', 'longitud');
 
         if ($busqueda !== '') {
             $query->where(function ($q) use ($busqueda) {
                 $q->where('nombre', 'like', "%{$busqueda}%")
-                ->orWhere('telefono', 'like', "%{$busqueda}%")
-                ->orWhere('colonia', 'like', "%{$busqueda}%")
-                ->orWhere('ciudad', 'like', "%{$busqueda}%")
-                ->orWhere('ine', 'like', "%{$busqueda}%");
+                  ->orWhere('telefono', 'like', "%{$busqueda}%")
+                  ->orWhere('colonia', 'like', "%{$busqueda}%")
+                  ->orWhere('ciudad', 'like', "%{$busqueda}%")
+                  ->orWhere('ine', 'like', "%{$busqueda}%");
             });
         }
 
@@ -52,6 +54,7 @@ class ClienteController extends Controller
 
         return view('clientes.index', compact('clientes', 'resumen', 'busqueda'));
     }
+
     public function create()
     {
         $usuarios = User::where('is_active', true)->get();

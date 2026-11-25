@@ -14,7 +14,7 @@
 </style>
 
 @php
-    // Evaluamos el permiso UNA SOLA VEZ fuera del ciclo para evitar 1,500+ consultas N+1
+    // Evaluamos el permiso UNA SOLA VEZ fuera del ciclo para evitar consultas N+1
     $puedeCobrar = auth()->user()->tienePermiso('cobranza.register');
 @endphp
 
@@ -61,10 +61,14 @@
                                 <input type="hidden" name="Dia" value="{{ $dia }}">
                                 <select name="cobrador" class="form-select form-select-sm shadow-sm" required>
                                     <option value="">Filtrar Cobrador</option>
-                                    <option value="Todos" {{ $filtroCobrador == 0 ? 'selected' : '' }}>Ver Todos</option>
+                                    <option value="Todos" {{ (string)$filtroCobrador === '0' || $filtroCobrador === 'Todos' ? 'selected' : '' }}>Ver Todos</option>
                                     @foreach($cobradores as $c)
-                                        <option value="{{ $c->id }}" {{ $filtroCobrador == $c->id ? 'selected' : '' }}>
-                                            {{ $c->username }}
+                                        @php
+                                            $cobId   = is_object($c) ? ($c->id ?? '') : (is_array($c) ? ($c['id'] ?? '') : $c);
+                                            $cobName = is_object($c) ? ($c->username ?? $cobId) : (is_array($c) ? ($c['username'] ?? $cobId) : $c);
+                                        @endphp
+                                        <option value="{{ $cobId }}" {{ (string)$filtroCobrador === (string)$cobId ? 'selected' : '' }}>
+                                            {{ $cobName }}
                                         </option>
                                     @endforeach
                                 </select>
@@ -102,42 +106,47 @@
                     </thead>
                     <tbody>
                         @foreach($ventas as $row)
-                            <tr>
-                                <td class="fw-bold text-dark">#{{ $row->folio ?? $row->venta_id_legacy ?? $row->id }}</td>
-                                <td class="text-muted small">{{ $row->fecha_formato }}</td>
-                                <td>{{ $row->vendedor_nombre ?? 'Sistema' }}</td>
-                                <td>{{ $row->cobrador_nombre ?? 'Sin asignar' }}</td>
-                                <td class="col-nombre fw-semibold text-dark">{{ $row->cliente_nombre ?? 'Sin Cliente' }}</td>
-                                <td>
-                                    @if(!empty($row->cliente_telefono))
-                                        <a href="tel:+52{{ $row->cliente_telefono }}" class="btn btn-sm btn-light border px-2 py-1 rounded-3 small">
-                                            <i class="bi bi-telephone text-success me-1"></i>{{ $row->cliente_telefono }}
-                                        </a>
-                                    @else
-                                        <span class="text-muted small">-</span>
-                                    @endif
-                                </td>
-                                <td class="text-muted small">{{ $row->cliente_ciudad ?? '-' }}</td>
-                                <td class="text-center fw-medium">{{ $row->num_pagos ?? '0' }}</td>
-                                <td class="small fw-semibold text-secondary">{{ $row->fpago_formato ?? '-' }}</td>
-                                <td class="text-end fw-bold text-danger">${{ number_format($row->saldo_restante ?? 0, 2) }}</td>
-                                <td class="text-end fw-semibold text-dark">${{ number_format($row->total ?? 0, 2) }}</td>
-                                <td class="text-center">
-                                    <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ $row->status ?? 'Pendiente' }}</span>
-                                </td>
-                                <td class="text-center">
-                                    <span class="badge bg-light text-dark border">{{ $row->dia_semana ?? '-' }}</span>
-                                </td>
-                                <td class="text-center pe-4">
-                                    @if($puedeCobrar)
-                                        <a href="{{ route('abonos.show', ['id' => $row->id, 'tipo' => $tipoAbono]) }}" class="btn btn-sm btn-success px-3 fw-bold rounded-3 shadow-sm">
-                                            <i class="bi bi-cash me-1"></i> Cobrar
-                                        </a>
-                                    @else
-                                        <span class="badge bg-light text-muted border">Solo lectura</span>
-                                    @endif
-                                </td>
-                            </tr>
+                            @php
+                                $rowObj = is_array($row) ? (object) $row : $row;
+                            @endphp
+                            @if(is_object($rowObj))
+                                <tr>
+                                    <td class="fw-bold text-dark">#{{ $rowObj->folio ?? $rowObj->venta_id_legacy ?? $rowObj->id }}</td>
+                                    <td class="text-muted small">{{ $rowObj->fecha_formato ?? '' }}</td>
+                                    <td>{{ $rowObj->vendedor_nombre ?? 'Sistema' }}</td>
+                                    <td>{{ $rowObj->cobrador_nombre ?? 'Sin asignar' }}</td>
+                                    <td class="col-nombre fw-semibold text-dark">{{ $rowObj->cliente_nombre ?? 'Sin Cliente' }}</td>
+                                    <td>
+                                        @if(!empty($rowObj->cliente_telefono))
+                                            <a href="tel:+52{{ $rowObj->cliente_telefono }}" class="btn btn-sm btn-light border px-2 py-1 rounded-3 small text-nowrap">
+                                                <i class="bi bi-telephone text-success me-1"></i>{{ $rowObj->cliente_telefono }}
+                                            </a>
+                                        @else
+                                            <span class="text-muted small">-</span>
+                                        @endif
+                                    </td>
+                                    <td class="text-muted small">{{ $rowObj->cliente_ciudad ?? '-' }}</td>
+                                    <td class="text-center fw-medium">{{ $rowObj->num_pagos ?? '0' }}</td>
+                                    <td class="small fw-semibold text-secondary">{{ $rowObj->fpago_formato ?? '-' }}</td>
+                                    <td class="text-end fw-bold text-danger">${{ number_format($rowObj->saldo_restante ?? 0, 2) }}</td>
+                                    <td class="text-end fw-semibold text-dark">${{ number_format($rowObj->total ?? 0, 2) }}</td>
+                                    <td class="text-center">
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ $rowObj->status ?? 'Pendiente' }}</span>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge bg-light text-dark border">{{ $rowObj->dia_semana ?? '-' }}</span>
+                                    </td>
+                                    <td class="text-center pe-4 text-nowrap">
+                                        @if($puedeCobrar)
+                                            <a href="{{ route('abonos.show', ['id' => $rowObj->id, 'tipo' => $tipoAbono]) }}" class="btn btn-sm btn-success px-3 fw-bold rounded-3 shadow-sm text-nowrap">
+                                                <i class="bi bi-cash me-1"></i> Cobrar
+                                            </a>
+                                        @else
+                                            <span class="badge bg-light text-muted border">Solo lectura</span>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endif
                         @endforeach
                     </tbody>
                 </table>

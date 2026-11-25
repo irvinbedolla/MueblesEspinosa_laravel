@@ -32,7 +32,7 @@ class User extends Authenticatable
     public function roles()
     {
         return $this->belongsToMany(
-            Roles::class, 
+            Roles::class,
             'user_has_roles', // Nombre de la tabla pivote
             'user_id',        // Clave foránea de esta tabla (users)
             'role_id'         // Clave foránea del modelo relacionado (roles)
@@ -50,19 +50,28 @@ class User extends Authenticatable
     }
 
     /**
-     * Verificar si el usuario tiene un rol específico por su nombre
+     * Verificar si el usuario tiene un rol específico (insensible a mayúsculas/minúsculas)
+     * Soporta también 'admin' como alias de 'administrador'
      */
     public function hasRole(string $roleName): bool
     {
-        return $this->roles()->where('name', $roleName)->exists();
+        $buscado = strtolower(trim($roleName));
+        $rolesUsuario = $this->roles->pluck('name')->map(fn ($n) => strtolower(trim((string) $n)));
+
+        if ($buscado === 'admin' || $buscado === 'administrador') {
+            return $rolesUsuario->contains('administrador') || $rolesUsuario->contains('admin');
+        }
+
+        return $rolesUsuario->contains($buscado);
     }
 
     /**
-     * Helper alternativo para verificar si es administrador
+     * Verificar si el usuario es Administrador
      */
     public function isAdmin(): bool
     {
-        return $this->hasRole('admin') || $this->username === 'admin';
+        return $this->hasRole('administrador')
+            || strtolower(trim((string) $this->username)) === 'admin';
     }
 
     public function isVendedor(): bool
@@ -82,7 +91,7 @@ class User extends Authenticatable
         }
 
         return $this->roles()
-            ->whereHas('permissions', fn($q) => $q->where('name', $permiso))
+            ->whereHas('permissions', fn ($q) => $q->where('name', $permiso))
             ->exists();
     }
 }
